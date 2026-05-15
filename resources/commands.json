@@ -1,0 +1,148 @@
+{
+  "version": "default",
+  "categories": [
+    {
+      "name": "Model",
+      "icon": "Box",
+      "commands": [
+        { "arg": "--model", "short": "-m", "label": "Model Path", "description": "Model path to load", "type": "string", "placeholder": "/path/to/model.gguf", "env": "LLAMA_ARG_MODEL" },
+        { "arg": "--model-url", "short": "-mu", "label": "Model URL", "description": "Model download URL", "type": "string", "placeholder": "https://...", "env": "LLAMA_ARG_MODEL_URL" },
+        { "arg": "--hf-repo", "short": "-hf", "label": "HuggingFace Repo", "description": "HuggingFace model repo (user/model[:quant])", "type": "string", "placeholder": "ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M", "env": "LLAMA_ARG_HF_REPO" },
+        { "arg": "--hf-file", "short": "-hff", "label": "HuggingFace File", "description": "HuggingFace model file override", "type": "string", "placeholder": "model.gguf", "env": "LLAMA_ARG_HF_FILE" },
+        { "arg": "--hf-token", "short": "-hft", "label": "HuggingFace Token", "description": "HuggingFace access token", "type": "string", "placeholder": "hf_...", "env": "HF_TOKEN" },
+        { "arg": "--ctx-size", "short": "-c", "label": "Context Size", "description": "Size of the prompt context (0 = from model)", "type": "number", "default": 0, "min": 0, "max": 131072, "env": "LLAMA_ARG_CTX_SIZE" },
+        { "arg": "--n-predict", "short": "-n", "label": "Max Tokens to Predict", "description": "Number of tokens to predict (-1 = infinity)", "type": "number", "default": -1, "min": -1, "max": 65536, "env": "LLAMA_ARG_N_PREDICT" },
+        { "arg": "--lora", "label": "LoRA Adapter", "description": "Path to LoRA adapter", "type": "string", "placeholder": "/path/to/lora.gguf" },
+        { "arg": "--mmproj", "short": "-mm", "label": "Multimodal Projector", "description": "Path to multimodal projector file", "type": "string", "placeholder": "/path/to/mmproj.gguf", "env": "LLAMA_ARG_MMPROJ" }
+      ]
+    },
+    {
+      "name": "Performance",
+      "icon": "Cpu",
+      "commands": [
+        { "arg": "--threads", "short": "-t", "label": "CPU Threads", "description": "Number of CPU threads for generation (-1 = auto)", "type": "number", "default": -1, "min": -1, "max": 256, "env": "LLAMA_ARG_THREADS" },
+        { "arg": "--threads-batch", "short": "-tb", "label": "Batch Threads", "description": "Threads for batch/prompt processing (default: same as --threads)", "type": "number", "default": -1, "min": -1, "max": 256 },
+        { "arg": "--batch-size", "short": "-b", "label": "Batch Size", "description": "Logical maximum batch size", "type": "number", "default": 2048, "min": 1, "max": 65536, "env": "LLAMA_ARG_BATCH" },
+        { "arg": "--ubatch-size", "short": "-ub", "label": "Micro-Batch Size", "description": "Physical maximum batch size", "type": "number", "default": 512, "min": 1, "max": 65536, "env": "LLAMA_ARG_UBATCH" },
+        { "arg": "--parallel", "short": "-np", "label": "Parallel Sequences", "description": "Number of parallel sequences to decode", "type": "number", "default": 1, "min": 1, "max": 64, "env": "LLAMA_ARG_N_PARALLEL" },
+        { "arg": "--keep", "label": "Keep Tokens", "description": "Tokens to keep from initial prompt (-1 = all)", "type": "number", "default": 0, "min": -1, "max": 65536 },
+        { "arg": "--mlock", "label": "Memory Lock", "description": "Force system to keep model in RAM (no swap)", "type": "boolean", "default": false, "env": "LLAMA_ARG_MLOCK" },
+        { "arg": "--mmap", "label": "Memory Map", "description": "Memory-map the model file (faster load)", "type": "boolean", "default": true, "env": "LLAMA_ARG_MMAP" },
+        { "arg": "--flash-attn", "short": "-fa", "label": "Flash Attention", "description": "Flash Attention mode", "type": "select", "options": ["auto", "on", "off"], "default": "auto", "env": "LLAMA_ARG_FLASH_ATTN" },
+        { "arg": "--swa-full", "label": "Full SWA Cache", "description": "Use full-size SWA cache", "type": "boolean", "default": false, "env": "LLAMA_ARG_SWA_FULL" },
+        { "arg": "--check-tensors", "label": "Check Tensors", "description": "Check model tensor data for invalid values", "type": "boolean", "default": false },
+        { "arg": "--prio", "label": "Process Priority", "description": "Process/thread priority: low(-1), normal(0), medium(1), high(2), realtime(3)", "type": "select", "options": ["-1", "0", "1", "2", "3"], "default": "0" },
+        { "arg": "--poll", "label": "Poll Level", "description": "Polling level to wait for work (0-100, 0 = no polling)", "type": "number", "default": 50, "min": 0, "max": 100 },
+        { "arg": "--numa", "label": "NUMA Mode", "description": "NUMA optimization type", "type": "select", "options": ["", "distribute", "isolate", "numactl"], "default": "", "env": "LLAMA_ARG_NUMA" }
+      ]
+    },
+    {
+      "name": "GPU",
+      "icon": "Zap",
+      "commands": [
+        { "arg": "--gpu-layers", "short": "-ngl", "label": "GPU Layers", "description": "Max layers to store in VRAM ('auto', 'all', or number)", "type": "string", "default": "auto", "placeholder": "auto", "env": "LLAMA_ARG_N_GPU_LAYERS" },
+        { "arg": "--split-mode", "short": "-sm", "label": "Split Mode", "description": "How to split model across multiple GPUs", "type": "select", "options": ["layer", "none", "row", "tensor"], "default": "layer", "env": "LLAMA_ARG_SPLIT_MODE" },
+        { "arg": "--main-gpu", "short": "-mg", "label": "Main GPU", "description": "Primary GPU index for the model", "type": "number", "default": 0, "min": 0, "max": 16, "env": "LLAMA_ARG_MAIN_GPU" },
+        { "arg": "--device", "short": "-dev", "label": "Devices", "description": "Comma-separated list of devices for offloading", "type": "string", "placeholder": "CUDA0,CUDA1", "env": "LLAMA_ARG_DEVICE" },
+        { "arg": "--tensor-split", "short": "-ts", "label": "Tensor Split", "description": "Fraction to offload to each GPU (e.g. 3,1)", "type": "string", "placeholder": "3,1", "env": "LLAMA_ARG_TENSOR_SPLIT" },
+        { "arg": "--kv-offload", "short": "-kvo", "label": "KV Cache Offload", "description": "Enable KV cache offloading to GPU", "type": "boolean", "default": true, "env": "LLAMA_ARG_KV_OFFLOAD" },
+        { "arg": "--op-offload", "label": "Op Offload", "description": "Offload host tensor operations to device", "type": "boolean", "default": true },
+        { "arg": "--fit", "short": "-fit", "label": "Auto Fit Memory", "description": "Adjust arguments to fit in device memory", "type": "select", "options": ["on", "off"], "default": "on", "env": "LLAMA_ARG_FIT" },
+        { "arg": "--cpu-moe", "short": "-cmoe", "label": "CPU MoE", "description": "Keep all MoE weights in CPU", "type": "boolean", "default": false, "env": "LLAMA_ARG_CPU_MOE" }
+      ]
+    },
+    {
+      "name": "KV Cache",
+      "icon": "Database",
+      "commands": [
+        { "arg": "--cache-type-k", "short": "-ctk", "label": "KV Cache Type (K)", "description": "KV cache data type for Keys", "type": "select", "options": ["f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"], "default": "f16", "env": "LLAMA_ARG_CACHE_TYPE_K" },
+        { "arg": "--cache-type-v", "short": "-ctv", "label": "KV Cache Type (V)", "description": "KV cache data type for Values", "type": "select", "options": ["f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"], "default": "f16", "env": "LLAMA_ARG_CACHE_TYPE_V" },
+        { "arg": "--repack", "label": "Weight Repacking", "description": "Enable weight repacking for performance", "type": "boolean", "default": true, "env": "LLAMA_ARG_REPACK" }
+      ]
+    },
+    {
+      "name": "Sampling",
+      "icon": "Sliders",
+      "commands": [
+        { "arg": "--temperature", "label": "Temperature", "description": "Sampling temperature (higher = more creative)", "type": "number", "default": 0.8, "min": 0, "max": 2, "env": "" },
+        { "arg": "--top-k", "label": "Top-K", "description": "Top-K sampling (0 = disabled)", "type": "number", "default": 40, "min": 0, "max": 1000, "env": "LLAMA_ARG_TOP_K" },
+        { "arg": "--top-p", "label": "Top-P", "description": "Top-P nucleus sampling (1.0 = disabled)", "type": "number", "default": 0.95, "min": 0, "max": 1 },
+        { "arg": "--min-p", "label": "Min-P", "description": "Min-P sampling (0.0 = disabled)", "type": "number", "default": 0.05, "min": 0, "max": 1 },
+        { "arg": "--seed", "short": "-s", "label": "Seed", "description": "RNG seed (-1 = random)", "type": "number", "default": -1, "min": -1, "max": 2147483647 },
+        { "arg": "--repeat-penalty", "label": "Repeat Penalty", "description": "Penalize repetition (1.0 = disabled)", "type": "number", "default": 1.0, "min": 0, "max": 2 },
+        { "arg": "--repeat-last-n", "label": "Repeat Last N", "description": "Tokens to consider for repeat penalty (-1 = ctx)", "type": "number", "default": 64, "min": -1, "max": 65536 },
+        { "arg": "--presence-penalty", "label": "Presence Penalty", "description": "Presence penalty (0.0 = disabled)", "type": "number", "default": 0.0, "min": 0, "max": 2 },
+        { "arg": "--frequency-penalty", "label": "Frequency Penalty", "description": "Frequency penalty (0.0 = disabled)", "type": "number", "default": 0.0, "min": 0, "max": 2 },
+        { "arg": "--dynatemp-range", "label": "Dynamic Temp Range", "description": "Dynamic temperature range (0.0 = disabled)", "type": "number", "default": 0.0, "min": 0, "max": 2 },
+        { "arg": "--dynatemp-exp", "label": "Dynamic Temp Exponent", "description": "Dynamic temperature exponent", "type": "number", "default": 1.0, "min": 0, "max": 4 },
+        { "arg": "--mirostat", "label": "Mirostat", "description": "Mirostat sampling mode (0=off, 1=v1, 2=v2)", "type": "select", "options": ["0", "1", "2"], "default": "0" },
+        { "arg": "--mirostat-lr", "label": "Mirostat LR (eta)", "description": "Mirostat learning rate", "type": "number", "default": 0.1, "min": 0, "max": 1 },
+        { "arg": "--mirostat-ent", "label": "Mirostat Entropy (tau)", "description": "Mirostat target entropy", "type": "number", "default": 5.0, "min": 0, "max": 10 },
+        { "arg": "--xtc-probability", "label": "XTC Probability", "description": "XTC sampling probability (0.0 = disabled)", "type": "number", "default": 0.0, "min": 0, "max": 1 },
+        { "arg": "--xtc-threshold", "label": "XTC Threshold", "description": "XTC sampling threshold", "type": "number", "default": 0.1, "min": 0, "max": 1 },
+        { "arg": "--dry-multiplier", "label": "DRY Multiplier", "description": "DRY sampling multiplier (0.0 = disabled)", "type": "number", "default": 0.0, "min": 0, "max": 4 },
+        { "arg": "--dry-base", "label": "DRY Base", "description": "DRY sampling base value", "type": "number", "default": 1.75, "min": 1, "max": 4 },
+        { "arg": "--ignore-eos", "label": "Ignore EOS", "description": "Ignore end-of-stream token and keep generating", "type": "boolean", "default": false },
+        { "arg": "--samplers", "label": "Sampler Pipeline", "description": "Sampler order separated by ';'", "type": "text", "default": "penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;temperature", "placeholder": "penalties;dry;top_k;top_p;temperature" },
+        { "arg": "--grammar", "label": "Grammar (BNF)", "description": "BNF-like grammar to constrain output", "type": "text", "placeholder": "root ::= ..." },
+        { "arg": "--json-schema", "short": "-j", "label": "JSON Schema", "description": "JSON schema to constrain output", "type": "text", "placeholder": "{}" }
+      ]
+    },
+    {
+      "name": "RoPE / YaRN",
+      "icon": "Wind",
+      "commands": [
+        { "arg": "--rope-scaling", "label": "RoPE Scaling", "description": "RoPE frequency scaling method", "type": "select", "options": ["", "none", "linear", "yarn"], "default": "", "env": "LLAMA_ARG_ROPE_SCALING_TYPE" },
+        { "arg": "--rope-scale", "label": "RoPE Scale", "description": "RoPE context scaling factor", "type": "number", "default": 1.0, "min": 0.1, "max": 32, "env": "LLAMA_ARG_ROPE_SCALE" },
+        { "arg": "--rope-freq-base", "label": "RoPE Freq Base", "description": "RoPE base frequency for NTK-aware scaling", "type": "number", "default": 0, "min": 0, "max": 10000000, "env": "LLAMA_ARG_ROPE_FREQ_BASE" },
+        { "arg": "--rope-freq-scale", "label": "RoPE Freq Scale", "description": "RoPE frequency scaling factor (1/N)", "type": "number", "default": 0, "min": 0, "max": 1, "env": "LLAMA_ARG_ROPE_FREQ_SCALE" },
+        { "arg": "--yarn-orig-ctx", "label": "YaRN Original Context", "description": "YaRN original context size (0 = model default)", "type": "number", "default": 0, "min": 0, "max": 131072, "env": "LLAMA_ARG_YARN_ORIG_CTX" },
+        { "arg": "--yarn-ext-factor", "label": "YaRN Ext Factor", "description": "YaRN extrapolation mix factor (0.0 = full interpolation)", "type": "number", "default": -1, "min": -1, "max": 2, "env": "LLAMA_ARG_YARN_EXT_FACTOR" },
+        { "arg": "--yarn-attn-factor", "label": "YaRN Attn Factor", "description": "YaRN attention magnitude scale", "type": "number", "default": -1, "min": -1, "max": 4, "env": "LLAMA_ARG_YARN_ATTN_FACTOR" },
+        { "arg": "--yarn-beta-slow", "label": "YaRN Beta Slow", "description": "YaRN high correction dim (alpha)", "type": "number", "default": -1, "min": -1, "max": 128, "env": "LLAMA_ARG_YARN_BETA_SLOW" },
+        { "arg": "--yarn-beta-fast", "label": "YaRN Beta Fast", "description": "YaRN low correction dim (beta)", "type": "number", "default": -1, "min": -1, "max": 128, "env": "LLAMA_ARG_YARN_BETA_FAST" }
+      ]
+    },
+    {
+      "name": "Server",
+      "icon": "Server",
+      "commands": [
+        { "arg": "--port", "label": "Server Port", "description": "Port the server listens on", "type": "number", "default": 8080, "min": 1024, "max": 65535, "env": "LLAMA_ARG_PORT" },
+        { "arg": "--host", "label": "Server Host", "description": "Host address to bind", "type": "string", "default": "127.0.0.1", "placeholder": "127.0.0.1", "env": "LLAMA_ARG_HOST" },
+        { "arg": "--chat-template", "label": "Chat Template", "description": "Custom Jinja chat template name or path", "type": "string", "placeholder": "llama3", "env": "LLAMA_ARG_CHAT_TEMPLATE" },
+        { "arg": "--system-prompt", "short": "-sys", "label": "System Prompt", "description": "System prompt to use with model", "type": "text", "placeholder": "You are a helpful assistant." },
+        { "arg": "--jinja", "label": "Use Jinja Templating", "description": "Enable Jinja template engine for chat", "type": "boolean", "default": true, "env": "LLAMA_ARG_JINJA" },
+        { "arg": "--reasoning-format", "label": "Reasoning Format", "description": "Format for model reasoning output", "type": "select", "options": ["auto", "none", "deepseek", "deepseek-legacy"], "default": "auto", "env": "LLAMA_ARG_THINK" },
+        { "arg": "--reasoning", "short": "-rea", "label": "Reasoning Mode", "description": "Enable reasoning/thinking in chat", "type": "select", "options": ["auto", "on", "off"], "default": "auto", "env": "LLAMA_ARG_REASONING" },
+        { "arg": "--reasoning-budget", "label": "Reasoning Budget (tokens)", "description": "Token budget for thinking (-1 = unlimited)", "type": "number", "default": -1, "min": -1, "max": 65536, "env": "LLAMA_ARG_THINK_BUDGET" }
+      ]
+    },
+    {
+      "name": "Logging",
+      "icon": "FileText",
+      "commands": [
+        { "arg": "--log-disable", "label": "Disable Logging", "description": "Disable log output entirely", "type": "boolean", "default": false },
+        { "arg": "--log-file", "label": "Log File", "description": "Save log output to file", "type": "string", "placeholder": "/path/to/llama.log", "env": "LLAMA_LOG_FILE" },
+        { "arg": "--log-colors", "label": "Log Colors", "description": "Colorize log output", "type": "select", "options": ["auto", "on", "off"], "default": "auto", "env": "LLAMA_LOG_COLORS" },
+        { "arg": "--verbose", "short": "-v", "label": "Verbose Mode", "description": "Log all messages (useful for debugging)", "type": "boolean", "default": false },
+        { "arg": "--log-verbosity", "short": "-lv", "label": "Verbosity Level", "description": "0=generic, 1=error, 2=warning, 3=info, 4=debug", "type": "select", "options": ["0", "1", "2", "3", "4"], "default": "3", "env": "LLAMA_LOG_VERBOSITY" },
+        { "arg": "--log-prefix", "label": "Log Prefix", "description": "Enable prefix in log messages", "type": "boolean", "default": false, "env": "LLAMA_LOG_PREFIX" },
+        { "arg": "--log-timestamps", "label": "Log Timestamps", "description": "Enable timestamps in log messages", "type": "boolean", "default": false, "env": "LLAMA_LOG_TIMESTAMPS" },
+        { "arg": "--offline", "label": "Offline Mode", "description": "Force cache usage, prevent network access", "type": "boolean", "default": false, "env": "LLAMA_OFFLINE" }
+      ]
+    },
+    {
+      "name": "Speculative Decoding",
+      "icon": "GitBranch",
+      "commands": [
+        { "arg": "--spec-type", "label": "Speculative Type", "description": "Comma-separated speculative decoding types", "type": "string", "placeholder": "draft-simple", "env": "LLAMA_ARG_SPEC_TYPE" },
+        { "arg": "--spec-draft-model", "short": "-md", "label": "Draft Model", "description": "Draft model path for speculative decoding", "type": "string", "placeholder": "/path/to/draft.gguf", "env": "LLAMA_ARG_SPEC_DRAFT_MODEL" },
+        { "arg": "--spec-draft-ngl", "short": "-ngld", "label": "Draft GPU Layers", "description": "Max draft model layers in VRAM", "type": "string", "default": "auto", "placeholder": "auto", "env": "LLAMA_ARG_N_GPU_LAYERS_DRAFT" },
+        { "arg": "--spec-draft-n-max", "label": "Draft Max Tokens", "description": "Tokens to draft for speculative decoding", "type": "number", "default": 16, "min": 1, "max": 128, "env": "LLAMA_ARG_SPEC_DRAFT_N_MAX" },
+        { "arg": "--spec-draft-n-min", "label": "Draft Min Tokens", "description": "Minimum draft tokens for speculative decoding", "type": "number", "default": 0, "min": 0, "max": 128, "env": "LLAMA_ARG_SPEC_DRAFT_N_MIN" },
+        { "arg": "--spec-draft-p-min", "label": "Draft P-Min", "description": "Minimum speculative decoding probability (greedy)", "type": "number", "default": 0.75, "min": 0, "max": 1, "env": "LLAMA_ARG_SPEC_DRAFT_P_MIN" },
+        { "arg": "--spec-draft-p-split", "label": "Draft P-Split", "description": "Speculative decoding split probability", "type": "number", "default": 0.1, "min": 0, "max": 1, "env": "LLAMA_ARG_SPEC_DRAFT_P_SPLIT" }
+      ]
+    }
+  ]
+}

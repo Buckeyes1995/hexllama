@@ -1,0 +1,22 @@
+appId: com.hexllama.app
+productName: Hexllama
+directories:
+  buildResources: build
+files:
+  - out/main/**/*
+  - out/preload/**/*
+  - out/renderer/**/*
+win:
+  target: nsis
+  icon: assets/icon_256.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+mac:
+  target: dmg
+  icon: assets/icon_256.png
+linux:
+  target: AppImage
+  icon: assets/icon_256.png

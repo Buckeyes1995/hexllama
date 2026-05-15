@@ -1,0 +1,170 @@
+import React, { useState, useEffect } from 'react'
+import { useStore } from '../store/useStore'
+import { HardDrive, Download, Trash, RefreshCw, Loader2, ChevronDown, Terminal } from 'lucide-react'
+import CommandsEditor from './CommandsEditor'
+export default function SettingsView() {
+  const { backends, activeBackend, setActiveBackend, setCommandsSchema, setBackends,
+          releaseInfo, checkingUpdate, downloadProgress, setDownloadProgress } = useStore()
+  const [downloading, setDownloading] = useState(false)
+  const [selectedAssetUrl, setSelectedAssetUrl] = useState('')
+  const [expandedEditor, setExpandedEditor] = useState<string | null>(null)
+  useEffect(() => {
+    if (releaseInfo?.assets.length && !selectedAssetUrl) {
+      setSelectedAssetUrl(releaseInfo.assets[0].downloadUrl)
+    }
+  }, [releaseInfo, selectedAssetUrl])
+  async function handleSwitchBackend(name: string) {
+    const b = backends.find(x => x.name === name)
+    if (!b) return
+    setActiveBackend(b)
+    const cmds = await window.api.getCommands(name)
+    if (cmds) setCommandsSchema(cmds)
+  }
+  async function handleDeleteBackend(name: string) {
+    if (!confirm(`Delete backend "${name}"? This will remove all files in that folder.`)) return
+    const res = await window.api.deleteBackend(name)
+    if (res.success) {
+      const updated = await window.api.listBackends()
+      setBackends(updated)
+    } else alert('Delete failed: ' + res.error)
+  }
+  function handleCheckUpdates() {
+    document.querySelector<HTMLButtonElement>('header .btn-icon[title="Check for llama.cpp updates"]')?.click()
+  }
+  const handleDownload = async () => {
+    if (!releaseInfo || !releaseInfo.assets.length) return
+    const asset = releaseInfo.assets.find(a => a.downloadUrl === selectedAssetUrl) || releaseInfo.assets[0]
+    setDownloading(true)
+    const res = await window.api.downloadRelease({
+      url: asset.downloadUrl,
+      version: `${releaseInfo.tagName}-${asset.name.replace('.zip', '')}`,
+      assetName: asset.name
+    })
+    setDownloading(false)
+    setDownloadProgress(null)
+    if (res.success) {
+      const backendsData = await window.api.listBackends()
+      setBackends(backendsData)
+    } else alert(`Download failed: ${res.error}`)
+  }
+  return (
+    <div className="max-w-3xl">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Settings</h1>
+          <p className="page-subtitle">Manage llama.cpp backends and configurations</p>
+        </div>
+      </div>
+      {}
+      <div className="settings-section">
+        <div className="settings-section-title"><HardDrive /> Installed Backends</div>
+        {backends.length === 0 ? (
+          <div className="text-center py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+            No backends installed. Download one below.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {backends.map((b) => (
+              <div key={b.name}>
+                <div className="settings-row">
+                  <div>
+                    <div className="settings-row-label flex items-center gap-2">
+                      {b.name}
+                      {activeBackend?.name === b.name && <span className="version-badge active-version">Active</span>}
+                      {!b.hasCommands && <span className="version-badge">Fallback Schema</span>}
+                    </div>
+                    <div className="settings-row-sub mono">{b.exe || 'No executable found'}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleSwitchBackend(b.name)}
+                      disabled={activeBackend?.name === b.name}
+                    >
+                      Set Active
+                    </button>
+                    <button
+                      className={`btn btn-ghost btn-sm flex items-center gap-1 ${expandedEditor === b.name ? 'btn-primary' : ''}`}
+                      onClick={() => setExpandedEditor(expandedEditor === b.name ? null : b.name)}
+                      title="Edit commands.json"
+                    >
+                      <Terminal size={13} />
+                      <ChevronDown size={12} style={{ transform: expandedEditor === b.name ? 'rotate(180deg)' : 'none', transition: 'transform 180ms' }} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon text-danger"
+                      onClick={() => handleDeleteBackend(b.name)}
+                      title="Delete backend"
+                    >
+                      <Trash size={14} />
+                    </button>
+                  </div>
+                </div>
+                {}
+                {expandedEditor === b.name && (
+                  <div className="ce-panel">
+                    <CommandsEditor backendName={b.name} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {}
+      <div className="settings-section">
+        <div className="settings-section-title"><Download /> Available Updates</div>
+        {checkingUpdate ? (
+          <div className="flex items-center gap-2 text-sm py-4" style={{ color: 'var(--text-muted)' }}>
+            <RefreshCw size={14} className="spin" /> Checking GitHub for releases...
+          </div>
+        ) : releaseInfo ? (
+          releaseInfo.error ? (
+            <div className="text-danger text-sm py-2">Error: {releaseInfo.error}</div>
+          ) : (
+            <div className="settings-row" style={{ borderBottom: 'none', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <div className="settings-row-label">{releaseInfo.name || releaseInfo.tagName}</div>
+                <div className="settings-row-sub">
+                  Published: {new Date(releaseInfo.publishedAt).toLocaleDateString()}
+                  {releaseInfo.isNewer === false && <span style={{ marginLeft: 8, color: 'var(--success)' }}>✓ Up to date</span>}
+                </div>
+              </div>
+              {releaseInfo.isNewer !== false && releaseInfo.assets.length > 0 && (
+                <div className="flex items-center gap-2 w-full">
+                  <select
+                    className="cmd-select flex-1"
+                    value={selectedAssetUrl}
+                    onChange={e => setSelectedAssetUrl(e.target.value)}
+                    disabled={downloading || !!downloadProgress}
+                  >
+                    {releaseInfo.assets.map(a => (
+                      <option key={a.downloadUrl} value={a.downloadUrl}>
+                        {a.name} ({Math.round(a.size / 1024 / 1024)} MB)
+                      </option>
+                    ))}
+                  </select>
+                  {downloading || downloadProgress ? (
+                    <div className="text-sm flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                      <Loader2 size={14} className="spin" />
+                      {downloadProgress?.phase === 'extracting' ? 'Extracting...' : `Downloading... ${downloadProgress?.percent || 0}%`}
+                    </div>
+                  ) : (
+                    <button className="btn btn-primary btn-sm" onClick={handleDownload}>Download</button>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        ) : (
+          <div className="text-sm py-4" style={{ color: 'var(--text-muted)' }}>Click "Check Now" to query GitHub.</div>
+        )}
+        <div className="mt-4 pt-4 border-t">
+          <button className="btn btn-secondary w-full justify-center" onClick={handleCheckUpdates} disabled={checkingUpdate || downloading}>
+            <RefreshCw size={14} className={checkingUpdate ? 'spin' : ''} /> Check Now
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
