@@ -74,6 +74,8 @@ interface LlamaCppApi {
   getVersion: () => Promise<string>
   benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
     Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>
+  onBenchProgress: (cb: (data: { line: string }) => void) => void
+  removeBenchProgressListener: () => void
 }
 declare global {
   interface Window { api: LlamaCppApi }

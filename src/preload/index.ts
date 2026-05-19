@@ -72,6 +72,11 @@ const api = {
   getVersion: () => ipcRenderer.invoke('get-version'),
   benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
     ipcRenderer.invoke('bench-run', opts),
+  onBenchProgress: (cb: (data: { line: string }) => void) => {
+    ipcRenderer.removeAllListeners('bench-progress')
+    ipcRenderer.on('bench-progress', (_e, data) => cb(data))
+  },
+  removeBenchProgressListener: () => ipcRenderer.removeAllListeners('bench-progress'),
 }
 if (process.contextIsolated) {
   try {
