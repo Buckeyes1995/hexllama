@@ -99,8 +99,9 @@ export default function BenchmarkView() {
   const startedAt = useRef<number>(0)
 
   useEffect(() => {
+    if (typeof window.api.onBenchProgress !== 'function') return
     window.api.onBenchProgress(({ line }) => setProgressLine(line))
-    return () => window.api.removeBenchProgressListener()
+    return () => window.api.removeBenchProgressListener?.()
   }, [])
 
   useEffect(() => {
