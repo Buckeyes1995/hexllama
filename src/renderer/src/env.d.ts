@@ -65,6 +65,8 @@ interface LlamaCppApi {
   removeExternalModelFolder: (folder: string) => Promise<{ success: boolean; folders: string[] }>
   openExternal: (url: string) => Promise<void>
   openChatWindow: (port: number) => Promise<void>
+  benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
+    Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>
 }
 declare global {
   interface Window { api: LlamaCppApi }

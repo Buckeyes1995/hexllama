@@ -54,6 +54,8 @@ const api = {
   removeExternalModelFolder: (folder: string) => ipcRenderer.invoke('remove-external-model-folder', folder),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   openChatWindow: (port: number) => ipcRenderer.invoke('open-chat-window', port),
+  benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
+    ipcRenderer.invoke('bench-run', opts),
 }
 if (process.contextIsolated) {
   try {
