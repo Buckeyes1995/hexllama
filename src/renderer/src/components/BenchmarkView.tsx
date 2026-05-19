@@ -165,10 +165,16 @@ export default function BenchmarkView() {
           className="btn btn-primary"
           onClick={handleRun}
           disabled={running || !modelPath}
+          title={!modelPath ? 'Select a model first' : (running ? 'Benchmark in progress' : '')}
         >
           {running ? <Loader2 size={15} className="spin" /> : <Play size={15} />}
           {running ? 'Running benchmark…' : 'Run Benchmark'}
         </button>
+        {!running && !modelPath && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Select a model above to enable.
+          </span>
+        )}
       </div>
 
       {running && (
