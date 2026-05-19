@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { Gauge, Play, Loader2, AlertCircle, ExternalLink } from 'lucide-react'
+import { Gauge, Play, Loader2, AlertCircle, ExternalLink, Copy, Check } from 'lucide-react'
 
 interface SweepParam { flag: string; label: string; placeholder: string; defaultValue: string }
 // `defaultValue` is what llama-bench uses when the flag isn't passed (per its --help).
@@ -28,6 +28,7 @@ export default function BenchmarkView() {
   const [error, setError] = useState('')
   const [progressLine, setProgressLine] = useState('')
   const [elapsed, setElapsed] = useState(0)
+  const [errorCopied, setErrorCopied] = useState(false)
   const startedAt = useRef<number>(0)
 
   useEffect(() => {
@@ -207,8 +208,44 @@ export default function BenchmarkView() {
       )}
 
       {error && (
-        <div className="hub-error" style={{ marginTop: 16 }}>
-          <AlertCircle size={14} /> <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</span>
+        <div
+          className="hub-error"
+          style={{
+            marginTop: 16,
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '12px 14px'
+          }}
+        >
+          <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+          <pre
+            style={{
+              flex: 1,
+              margin: 0,
+              fontFamily: "'SF Mono','Fira Code',monospace",
+              fontSize: 12,
+              lineHeight: 1.45,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              userSelect: 'text',
+              WebkitUserSelect: 'text',
+              cursor: 'text'
+            } as React.CSSProperties}
+          >
+            {error}
+          </pre>
+          <button
+            className="btn btn-ghost btn-icon"
+            onClick={() => {
+              navigator.clipboard.writeText(error)
+              setErrorCopied(true)
+              setTimeout(() => setErrorCopied(false), 1500)
+            }}
+            title="Copy error"
+            style={{ flexShrink: 0, padding: 6 }}
+          >
+            {errorCopied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
         </div>
       )}
 
