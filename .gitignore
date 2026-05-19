@@ -60,3 +60,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Dev-mode artifact: settings.json is normally written to userData,
+# but in dev mode APP_ROOT = process.cwd() (see src/main/ipc.ts), so
+# it lands in the repo root. Don't track it.
+/settings.json
