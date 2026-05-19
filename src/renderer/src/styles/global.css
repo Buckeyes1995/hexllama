@@ -396,7 +396,7 @@ input, textarea, select {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--bg-card);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 12px;
@@ -566,7 +566,7 @@ input, textarea, select {
   color: var(--text-secondary); cursor: pointer;
   transition: all var(--transition);
 }
-.launch-mode-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.launch-mode-btn:not(.active):hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
 .launch-mode-btn.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .launch-mode-btn:disabled { opacity: .5; cursor: not-allowed; }
 .launch-mode-btn svg { width: 11px; height: 11px; }
@@ -626,13 +626,14 @@ input, textarea, select {
 }
 .ce-category {
   border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-  overflow: hidden; background: var(--surface);
+  background: var(--surface);
 }
 .ce-category-header {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; cursor: pointer; background: var(--bg);
   transition: background var(--transition);
   user-select: none;
+  border-radius: calc(var(--radius-sm) - 1.5px) calc(var(--radius-sm) - 1.5px) 0 0;
 }
 .ce-category-header:hover { background: var(--border); }
 .ce-cat-name { font-size: 13px; font-weight: 600; color: var(--text); }
