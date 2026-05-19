@@ -626,13 +626,14 @@ input, textarea, select {
 }
 .ce-category {
   border: 1.5px solid var(--border); border-radius: var(--radius-sm);
-  overflow: hidden; background: var(--surface);
+  background: var(--surface);
 }
 .ce-category-header {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; cursor: pointer; background: var(--bg);
   transition: background var(--transition);
   user-select: none;
+  border-radius: calc(var(--radius-sm) - 1.5px) calc(var(--radius-sm) - 1.5px) 0 0;
 }
 .ce-category-header:hover { background: var(--border); }
 .ce-cat-name { font-size: 13px; font-weight: 600; color: var(--text); }
