@@ -156,19 +156,17 @@ export default function BenchmarkResultsTable({ rows }: { rows: Record<string, u
         <tbody>
           {enriched.map((r, i) => {
             const isBest = bestByTest.get(String(r.test)) === Number(r.avg_ts)
+            const bestBg = 'rgba(22,163,74,0.18)'
             return (
               <tr
                 key={i}
                 style={{
-                  borderBottom: i === enriched.length - 1 ? 'none' : '1px solid var(--border)',
-                  background: isBest
-                    ? 'rgba(22,163,74,0.08)'
-                    : (i % 2 === 1 ? 'var(--bg)' : undefined),
-                  boxShadow: isBest ? 'inset 3px 0 0 var(--success)' : undefined
+                  borderBottom: i === enriched.length - 1 ? 'none' : '1px solid var(--border)'
                 }}
               >
-                {columns.map(col => {
+                {columns.map((col, ci) => {
                   const isTs = col.key === 'ts_combined'
+                  const isFirst = ci === 0
                   return (
                     <td
                       key={col.key}
@@ -179,12 +177,17 @@ export default function BenchmarkResultsTable({ rows }: { rows: Record<string, u
                         fontFamily: col.numeric ? "'SF Mono','Fira Code',monospace" : undefined,
                         fontWeight: isTs ? 600 : 400,
                         color: isTs ? 'var(--text)' : 'var(--text-secondary)',
-                        fontVariantNumeric: 'tabular-nums'
+                        fontVariantNumeric: 'tabular-nums',
+                        background: isBest
+                          ? bestBg
+                          : (i % 2 === 1 ? 'var(--bg)' : undefined),
+                        borderLeft: isBest && isFirst ? '4px solid var(--success)' : undefined,
+                        paddingLeft: isBest && isFirst ? '10px' : '14px'
                       }}
                     >
                       {col.key === 'test' || col.key === 'ts_combined' || col.key === 'model_filename'
                         ? (isTs && isBest
-                            ? <><span style={{ color: 'var(--success)', marginRight: 4 }}>★</span>{String(r[col.key] ?? '—')}</>
+                            ? <><span style={{ color: 'var(--success)', fontWeight: 700, marginRight: 6 }}>★ BEST</span>{String(r[col.key] ?? '—')}</>
                             : String(r[col.key] ?? '—'))
                         : formatCell(r[col.key])}
                     </td>
