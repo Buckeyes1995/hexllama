@@ -226,6 +226,17 @@ export default function CreateModal() {
                     Port must be between 1024 and 65535.
                   </div>
                 )}
+                {(() => {
+                  const conflict = cards.find(c =>
+                    c.template.id !== editingTemplate?.id &&
+                    c.template.serverPort === serverPort
+                  )
+                  return conflict ? (
+                    <div className="form-hint" style={{ color: 'var(--warning)' }}>
+                      Port {serverPort} is already used by &ldquo;{conflict.template.name}&rdquo;. They cannot run at the same time.
+                    </div>
+                  ) : null
+                })()}
               </div>
             </div>
             {}
