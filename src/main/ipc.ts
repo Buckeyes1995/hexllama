@@ -628,7 +628,9 @@ export function registerIpcHandlers(): void {
       proc.on('error', err => resolve({ success: false, error: String(err) }))
       proc.on('exit', code => {
         if (code !== 0) {
-          const tail = stderr.trim().split('\n').slice(-6).join('\n')
+          // Capture a long tail so messages like "failed to create context with model"
+          // and their surrounding diagnostic lines all survive into the UI.
+          const tail = stderr.trim().split('\n').slice(-40).join('\n')
           resolve({ success: false, error: tail || `llama-bench exited with code ${code}` })
           return
         }
