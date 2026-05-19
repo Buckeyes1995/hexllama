@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { Play, Square, Settings, ChevronDown, MoreVertical, Copy, Trash, Download, Globe, Server } from 'lucide-react'
+import { Play, Square, Settings, ChevronDown, MoreVertical, Copy, Trash, Download, Globe, Server, AlertCircle } from 'lucide-react'
 import type { CardState, CommandParam } from '../../../shared/types'
 import CmdParamsEditor from './CmdParamsEditor'
 interface Props { card: CardState }
@@ -130,6 +130,12 @@ export default function ModelCard({ card }: Props) {
           {isRunning ? `Port ${card.template.serverPort}` : 'Ready'}
         </span>
       </div>
+      {!modelExists && card.template.modelPath && (
+        <div className="hub-error" style={{ margin: '0 18px 12px', fontSize: 12 }}>
+          <AlertCircle size={14} />
+          <span>Model file not found at <code style={{ background: 'transparent', wordBreak: 'break-all' }}>{card.template.modelPath}</code>. Move the file back, re-download it, or edit the template.</span>
+        </div>
+      )}
       {}
       <div className="card-launch-mode">
         <button
