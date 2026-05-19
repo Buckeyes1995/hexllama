@@ -2,19 +2,25 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { Gauge, Play, Loader2, AlertCircle, ExternalLink, Copy, Check } from 'lucide-react'
 
-interface SweepParam { flag: string; label: string; placeholder: string; defaultValue: string }
+interface SweepParam {
+  flag: string
+  label: string
+  placeholder: string
+  defaultValue: string
+  validValues: string  // shown after the flag so users know what they can type
+}
 // `defaultValue` is what llama-bench uses when the flag isn't passed (per its --help).
-// Shown next to the label so users know exactly what an empty input means.
+// `validValues` is a short description of the allowed input range or enumeration.
 const SWEEP_PARAMS: SweepParam[] = [
-  { flag: '-t',    label: 'Threads',         placeholder: 'e.g. 4,6,8',    defaultValue: '8' },
-  { flag: '-ngl',  label: 'GPU Layers',      placeholder: 'e.g. 99,30,0',  defaultValue: '99' },
-  { flag: '-b',    label: 'Batch Size',      placeholder: 'e.g. 512,2048', defaultValue: '2048' },
-  { flag: '-ub',   label: 'Micro-Batch',     placeholder: 'e.g. 256,512',  defaultValue: '512' },
-  { flag: '-p',    label: 'Prompt Size',     placeholder: 'e.g. 128,1024', defaultValue: '512' },
-  { flag: '-n',    label: 'Gen Size',        placeholder: 'e.g. 32,64',    defaultValue: '128' },
-  { flag: '-fa',   label: 'Flash Attn',      placeholder: 'e.g. 0,1',      defaultValue: '0' },
-  { flag: '-ctk',  label: 'KV Cache K',      placeholder: 'e.g. f16,q8_0', defaultValue: 'f16' },
-  { flag: '-ctv',  label: 'KV Cache V',      placeholder: 'e.g. f16,q8_0', defaultValue: 'f16' },
+  { flag: '-t',    label: 'Threads',     placeholder: 'e.g. 4,6,8',    defaultValue: '8',    validValues: '1..256' },
+  { flag: '-ngl',  label: 'GPU Layers',  placeholder: 'e.g. 99,30,0',  defaultValue: '99',   validValues: '0..99 (all)' },
+  { flag: '-b',    label: 'Batch Size',  placeholder: 'e.g. 512,2048', defaultValue: '2048', validValues: '1..65536' },
+  { flag: '-ub',   label: 'Micro-Batch', placeholder: 'e.g. 256,512',  defaultValue: '512',  validValues: '1..65536, ≤ batch' },
+  { flag: '-p',    label: 'Prompt Size', placeholder: 'e.g. 128,1024', defaultValue: '512',  validValues: '≥ 0' },
+  { flag: '-n',    label: 'Gen Size',    placeholder: 'e.g. 32,64',    defaultValue: '128',  validValues: '≥ 0' },
+  { flag: '-fa',   label: 'Flash Attn',  placeholder: 'e.g. 0,1',      defaultValue: '0',    validValues: '0 | 1' },
+  { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 | q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
+  { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 | q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
 ]
 
 export default function BenchmarkView() {
@@ -143,7 +149,12 @@ export default function BenchmarkView() {
                       default: <span className="mono">{p.defaultValue}</span>
                     </span>
                   </div>
-                  <div className="cmd-arg">{p.flag}</div>
+                  <div className="cmd-arg">
+                    {p.flag}
+                    <span style={{ marginLeft: 6, opacity: 0.7, fontWeight: 400 }}>
+                      ({p.validValues})
+                    </span>
+                  </div>
                 </div>
                 <div className="cmd-input-group">
                   <input
