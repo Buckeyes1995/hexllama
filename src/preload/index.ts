@@ -70,6 +70,8 @@ const api = {
     ipcRenderer.on('tab-moved-elsewhere', (_e, data) => cb(data))
   },
   getVersion: () => ipcRenderer.invoke('get-version'),
+  benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
+    ipcRenderer.invoke('bench-run', opts),
 }
 if (process.contextIsolated) {
   try {

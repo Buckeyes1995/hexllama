@@ -72,6 +72,8 @@ interface LlamaCppApi {
   notifyTabMoved: (url: string) => Promise<void>
   onTabMovedElsewhere: (cb: (data: { url: string }) => void) => void
   getVersion: () => Promise<string>
+  benchRun: (opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) =>
+    Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>
 }
 declare global {
   interface Window { api: LlamaCppApi }
