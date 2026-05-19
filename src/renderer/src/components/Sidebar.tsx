@@ -1,6 +1,6 @@
 import React from 'react'
 import { useStore } from '../store/useStore'
-import { LayoutGrid, Settings, FolderOpen, HardDrive, Search } from 'lucide-react'
+import { LayoutGrid, Settings, FolderOpen, HardDrive, Search, Gauge } from 'lucide-react'
 export default function Sidebar() {
   const { view, setView, backends, activeBackend, setActiveBackend, setCommandsSchema, paths } = useStore()
   async function switchBackend(name: string) {
@@ -33,6 +33,13 @@ export default function Sidebar() {
       >
         <Search size={16} />
         Model Hub
+      </button>
+      <button
+        className={`nav-item ${view === 'benchmark' ? 'active' : ''}`}
+        onClick={() => setView('benchmark')}
+      >
+        <Gauge size={16} />
+        Benchmark
       </button>
       <button
         className={`nav-item ${view === 'settings' ? 'active' : ''}`}

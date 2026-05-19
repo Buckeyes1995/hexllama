@@ -527,6 +527,46 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('open-chat-window', (_e, port: number) => {
     openChatWindow(port)
   })
+  ipcMain.handle('bench-run', async (_e, opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) => {
+    const binName = process.platform === 'win32' ? 'llama-bench.exe' : 'llama-bench'
+    // Backend binaries can live nested (e.g. <backendPath>/llama-bXXXX/llama-server).
+    // Derive llama-bench's location from the same subdir as the known exe.
+    const exeSubdir = opts.backendExe ? dirname(opts.backendExe) : ''
+    const binPath = join(opts.backendPath, exeSubdir, binName)
+    if (!isSafePath(BACKEND_DIR, binPath)) return { success: false, error: 'Access denied' }
+    if (!existsSync(binPath)) return { success: false, error: `llama-bench not found at ${binPath}` }
+    if (!opts.modelPath || !existsSync(opts.modelPath)) return { success: false, error: 'Model file not found' }
+    const args = ['-m', opts.modelPath, '-o', 'json']
+    if (opts.reps && opts.reps > 0) args.push('-r', String(opts.reps))
+    for (const [k, v] of Object.entries(opts.params || {})) {
+      const trimmed = (v || '').trim()
+      if (trimmed) args.push(k, trimmed)
+    }
+    return new Promise<{ success: boolean; rows?: unknown[]; error?: string }>((resolve) => {
+      let stdout = ''
+      let stderr = ''
+      const proc = spawn(binPath, args, { stdio: 'pipe', cwd: dirname(binPath) })
+      proc.stdout?.on('data', d => { stdout += d.toString() })
+      proc.stderr?.on('data', d => { stderr += d.toString() })
+      proc.on('error', err => resolve({ success: false, error: String(err) }))
+      proc.on('exit', code => {
+        if (code !== 0) {
+          const tail = stderr.trim().split('\n').slice(-6).join('\n')
+          resolve({ success: false, error: tail || `llama-bench exited with code ${code}` })
+          return
+        }
+        try {
+          const trimmed = stdout.trim()
+          const start = trimmed.indexOf('[')
+          const json = start >= 0 ? trimmed.slice(start) : trimmed
+          const parsed = JSON.parse(json)
+          resolve({ success: true, rows: Array.isArray(parsed) ? parsed : [parsed] })
+        } catch (e) {
+          resolve({ success: false, error: 'Failed to parse llama-bench JSON output. Stdout head: ' + stdout.slice(0, 400) })
+        }
+      })
+    })
+  })
   ipcMain.handle('stop-model', (_e, id: string) => {
     const proc = runningProcesses.get(id)
     if (!proc) return { success: true, alreadyStopped: true }
