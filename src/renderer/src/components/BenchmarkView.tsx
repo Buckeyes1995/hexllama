@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { Gauge, Play, Loader2, AlertCircle, ExternalLink, Copy, Check } from 'lucide-react'
+import { Gauge, Play, Loader2, AlertCircle, ExternalLink, Copy, Check, ChevronDown } from 'lucide-react'
 
 interface SweepParam {
   flag: string
@@ -8,20 +8,102 @@ interface SweepParam {
   placeholder: string
   defaultValue: string
   validValues: string  // shown after the flag so users know what they can type
+  choices?: string[]   // common values shown in the pick-menu next to the input
 }
 // `defaultValue` is what llama-bench uses when the flag isn't passed (per its --help).
 // `validValues` is a short description of the allowed input range or enumeration.
+// `choices` populates a checkbox dropdown next to the input -- ticking values
+// rebuilds the comma list automatically so users don't have to type quant names etc.
+const KV_TYPES = ['f16', 'f32', 'bf16', 'q8_0', 'q4_0', 'q4_1', 'iq4_nl', 'q5_0', 'q5_1']
 const SWEEP_PARAMS: SweepParam[] = [
-  { flag: '-t',    label: 'Threads',     placeholder: 'e.g. 4,6,8',    defaultValue: '8',    validValues: '1..256' },
-  { flag: '-ngl',  label: 'GPU Layers',  placeholder: 'e.g. 99,30,0',  defaultValue: '99',   validValues: '0..99 (all)' },
-  { flag: '-b',    label: 'Batch Size',  placeholder: 'e.g. 512,2048', defaultValue: '2048', validValues: '1..65536' },
-  { flag: '-ub',   label: 'Micro-Batch', placeholder: 'e.g. 256,512',  defaultValue: '512',  validValues: '1..65536, ≤ batch' },
-  { flag: '-p',    label: 'Prompt Size', placeholder: 'e.g. 128,1024', defaultValue: '512',  validValues: '≥ 0' },
-  { flag: '-n',    label: 'Gen Size',    placeholder: 'e.g. 32,64',    defaultValue: '128',  validValues: '≥ 0' },
-  { flag: '-fa',   label: 'Flash Attn',  placeholder: 'e.g. 0,1',      defaultValue: '0',    validValues: '0 | 1 — required = 1 for any non-f16/f32/bf16 KV cache type' },
-  { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
-  { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
+  { flag: '-t',    label: 'Threads',     placeholder: 'e.g. 4,6,8',    defaultValue: '8',    validValues: '1..256',                                                                                  choices: ['2', '4', '6', '8', '10', '12'] },
+  { flag: '-ngl',  label: 'GPU Layers',  placeholder: 'e.g. 99,30,0',  defaultValue: '99',   validValues: '0..99 (all)',                                                                              choices: ['0', '16', '32', '64', '99'] },
+  { flag: '-b',    label: 'Batch Size',  placeholder: 'e.g. 512,2048', defaultValue: '2048', validValues: '1..65536',                                                                                 choices: ['128', '256', '512', '1024', '2048', '4096'] },
+  { flag: '-ub',   label: 'Micro-Batch', placeholder: 'e.g. 256,512',  defaultValue: '512',  validValues: '1..65536, ≤ batch',                                                                        choices: ['64', '128', '256', '512', '1024'] },
+  { flag: '-p',    label: 'Prompt Size', placeholder: 'e.g. 128,1024', defaultValue: '512',  validValues: '≥ 0',                                                                                     choices: ['0', '128', '256', '512', '1024', '2048', '4096'] },
+  { flag: '-n',    label: 'Gen Size',    placeholder: 'e.g. 32,64',    defaultValue: '128',  validValues: '≥ 0',                                                                                     choices: ['0', '32', '64', '128', '256', '512'] },
+  { flag: '-fa',   label: 'Flash Attn',  placeholder: 'e.g. 0,1',      defaultValue: '0',    validValues: '0 | 1 — required = 1 for any non-f16/f32/bf16 KV cache type',                              choices: ['0', '1'] },
+  { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1',             choices: KV_TYPES },
+  { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1',             choices: KV_TYPES },
 ]
+
+function MultiChoiceMenu({ choices, value, onChange, disabled }: {
+  choices: string[]
+  value: string
+  onChange: (next: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = new Set(value.split(',').map(s => s.trim()).filter(Boolean))
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  function toggle(v: string) {
+    const next = new Set(selected)
+    if (next.has(v)) next.delete(v); else next.add(v)
+    onChange(choices.filter(c => next.has(c)).join(','))
+  }
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-icon"
+        onClick={() => setOpen(o => !o)}
+        disabled={disabled}
+        title="Pick common values"
+        style={{ padding: 4 }}
+      >
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          right: 0,
+          minWidth: 140,
+          background: 'var(--surface)',
+          border: '1.5px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          boxShadow: 'var(--shadow-md)',
+          zIndex: 50,
+          padding: 4
+        }}>
+          {choices.map(c => (
+            <label
+              key={c}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '5px 10px',
+                cursor: 'pointer',
+                fontSize: 12,
+                borderRadius: 4,
+                userSelect: 'none'
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+              onMouseLeave={e => (e.currentTarget.style.background = '')}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(c)}
+                onChange={() => toggle(c)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span style={{ fontFamily: "'SF Mono','Fira Code',monospace" }}>{c}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function BenchmarkView() {
   const { models, backends, activeBackend } = useStore()
@@ -172,7 +254,7 @@ export default function BenchmarkView() {
                     </span>
                   </div>
                 </div>
-                <div className="cmd-input-group">
+                <div className="cmd-input-group" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <input
                     type="text"
                     className="cmd-input"
@@ -180,7 +262,16 @@ export default function BenchmarkView() {
                     value={v}
                     onChange={e => setParams({ ...params, [p.flag]: e.target.value })}
                     disabled={running}
+                    style={{ flex: 1 }}
                   />
+                  {p.choices && (
+                    <MultiChoiceMenu
+                      choices={p.choices}
+                      value={v}
+                      onChange={next => setParams({ ...params, [p.flag]: next })}
+                      disabled={running}
+                    />
+                  )}
                 </div>
               </div>
             )
