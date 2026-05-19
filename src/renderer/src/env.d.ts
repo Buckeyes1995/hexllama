@@ -70,6 +70,10 @@ interface LlamaCppApi {
     Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>
   onBenchProgress: (cb: (data: { line: string }) => void) => void
   removeBenchProgressListener: () => void
+  benchShowResults: (rows: unknown[]) => Promise<{ success: boolean }>
+  getLatestBenchResults: () => Promise<Record<string, unknown>[]>
+  benchExportMarkdown: (content: string) => Promise<{ success: boolean; path?: string; error?: string; canceled?: boolean }>
+  benchExportPdf: () => Promise<{ success: boolean; path?: string; error?: string; canceled?: boolean }>
 }
 declare global {
   interface Window { api: LlamaCppApi }
