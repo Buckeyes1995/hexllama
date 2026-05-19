@@ -68,7 +68,7 @@ export default function BenchmarkResultsChart({ rows }: { rows: Record<string, u
           className="form-select"
           value={xKey}
           onChange={e => setXKey(e.target.value)}
-          style={{ padding: '4px 8px', fontSize: 12 }}
+          style={{ padding: '4px 28px 4px 8px', fontSize: 12 }}
         >
           {varying.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
         </select>
@@ -81,7 +81,7 @@ export default function BenchmarkResultsChart({ rows }: { rows: Record<string, u
           className="form-select"
           value={seriesKey}
           onChange={e => setSeriesKey(e.target.value)}
-          style={{ padding: '4px 8px', fontSize: 12 }}
+          style={{ padding: '4px 28px 4px 8px', fontSize: 12 }}
         >
           {varying.filter(c => c.key !== xKey).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
         </select>
@@ -119,11 +119,15 @@ export default function BenchmarkResultsChart({ rows }: { rows: Record<string, u
     )
   }
 
-  // Regular chart path: line for numeric X, bar for categorical X
+  // Regular chart path: line for numeric X, bar for categorical X.
+  // xCol / seriesCol can be momentarily undefined on first render before the
+  // initializer useEffect resolves them — skip the chart until both are ready.
   return (
     <div>
       {Toolbar}
-      <ChartView rows={enriched} xCol={xCol!} seriesCol={seriesCol!} />
+      {xCol && seriesCol
+        ? <ChartView rows={enriched} xCol={xCol} seriesCol={seriesCol} />
+        : <div style={{ height: 340 }} />}
     </div>
   )
 }
