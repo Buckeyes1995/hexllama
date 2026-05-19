@@ -15,19 +15,62 @@ const SWEEP_PARAMS: SweepParam[] = [
   { flag: '-ctv',  label: 'KV Cache V',      placeholder: 'f16,q8_0' },
 ]
 
-const TS_KEYS = ['avg_ts', 'stddev_ts']
+// Columns we know how to label and want to consider showing.
+// Order here is the rendered column order (left -> right) when present.
+const COLUMN_DEFS: { key: string; label: string; numeric?: boolean; alwaysShow?: boolean }[] = [
+  { key: 'test',          label: 'Test',                                       alwaysShow: true },
+  { key: 'n_threads',     label: 'Threads',     numeric: true },
+  { key: 'n_gpu_layers',  label: 'GPU Layers',  numeric: true },
+  { key: 'n_batch',       label: 'Batch',       numeric: true },
+  { key: 'n_ubatch',      label: 'µ-Batch',     numeric: true },
+  { key: 'n_depth',       label: 'Depth',       numeric: true },
+  { key: 'flash_attn',    label: 'FA',          numeric: true },
+  { key: 'type_k',        label: 'KV K' },
+  { key: 'type_v',        label: 'KV V' },
+  { key: 'split_mode',    label: 'Split' },
+  { key: 'main_gpu',      label: 'Main GPU',    numeric: true },
+  { key: 'model_filename', label: 'Model' },
+  { key: 'ts_combined',   label: 'tok/s',       numeric: true, alwaysShow: true },
+]
 
-function displayColumns(rows: Record<string, unknown>[]): string[] {
-  if (!rows.length) return []
-  const allKeys = Array.from(new Set(rows.flatMap(r => Object.keys(r))))
-  const varying = allKeys.filter(k => new Set(rows.map(r => r[k])).size > 1)
-  const cols = Array.from(new Set([...varying, ...TS_KEYS.filter(k => allKeys.includes(k))]))
-  // tok/s columns last
-  return cols.sort((a, b) => {
-    const aTs = TS_KEYS.includes(a), bTs = TS_KEYS.includes(b)
-    if (aTs && !bTs) return 1
-    if (!aTs && bTs) return -1
-    return 0
+function deriveTest(row: Record<string, unknown>): string {
+  const np = Number(row.n_prompt) || 0
+  const ng = Number(row.n_gen) || 0
+  if (np > 0 && ng === 0) return `pp${np}`
+  if (np === 0 && ng > 0) return `tg${ng}`
+  if (np > 0 && ng > 0) return `pp${np}+tg${ng}`
+  return '—'
+}
+
+function formatTs(avg: unknown, sd: unknown): string {
+  if (avg == null) return '—'
+  const a = Number(avg)
+  const s = Number(sd) || 0
+  if (!Number.isFinite(a)) return String(avg)
+  return `${a.toFixed(2)} ± ${s.toFixed(2)}`
+}
+
+function shortModelName(filename: unknown): string {
+  if (typeof filename !== 'string') return '—'
+  const base = filename.split(/[\\/]/).pop() || filename
+  return base.replace(/\.(gguf|bin|ggml)$/i, '')
+}
+
+function enrichRows(raw: Record<string, unknown>[]) {
+  return raw.map(r => ({
+    ...r,
+    test: deriveTest(r),
+    ts_combined: formatTs(r.avg_ts, r.stddev_ts),
+    model_filename: shortModelName(r.model_filename),
+  }))
+}
+
+function activeColumns(rows: Record<string, unknown>[]) {
+  return COLUMN_DEFS.filter(col => {
+    if (col.alwaysShow) return true
+    const vals = new Set(rows.map(r => r[col.key]))
+    vals.delete(undefined)
+    return vals.size > 1
   })
 }
 
@@ -38,9 +81,8 @@ function formatCell(v: unknown): string {
     if (Math.abs(v) >= 1000 || Number.isInteger(v)) return v.toLocaleString()
     return v.toFixed(2)
   }
-  if (typeof v === 'boolean') return v ? 'yes' : 'no'
-  const s = String(v)
-  return s.length > 60 ? s.slice(0, 57) + '…' : s
+  if (typeof v === 'boolean') return v ? '1' : '0'
+  return String(v)
 }
 
 export default function BenchmarkView() {
@@ -53,7 +95,8 @@ export default function BenchmarkView() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [error, setError] = useState('')
 
-  const columns = useMemo(() => displayColumns(rows), [rows])
+  const enriched = useMemo(() => enrichRows(rows), [rows])
+  const columns = useMemo(() => activeColumns(enriched), [enriched])
 
   async function handleRun() {
     setError(''); setRows([])
@@ -187,35 +230,68 @@ export default function BenchmarkView() {
         </div>
       )}
 
-      {rows.length > 0 && (
+      {enriched.length > 0 && (
         <div style={{ marginTop: 24 }}>
           <div className="settings-section-title" style={{ marginBottom: 12 }}>
-            <Gauge size={14} /> Results ({rows.length} row{rows.length === 1 ? '' : 's'})
+            <Gauge size={14} /> Results ({enriched.length} row{enriched.length === 1 ? '' : 's'})
           </div>
           <div style={{
             overflowX: 'auto',
             border: '1.5px solid var(--border)',
             borderRadius: 'var(--radius-sm)',
-            background: 'var(--surface)'
+            background: 'var(--surface)',
+            boxShadow: 'var(--shadow)'
           }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)', borderBottom: '1.5px solid var(--border)' }}>
-                  {columns.map(k => (
-                    <th key={k} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                      {k}
+                  {columns.map(col => (
+                    <th key={col.key} style={{
+                      padding: '10px 14px',
+                      textAlign: col.numeric ? 'right' : 'left',
+                      fontWeight: 600,
+                      fontSize: 11,
+                      letterSpacing: '0.4px',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-secondary)',
+                      whiteSpace: 'nowrap',
+                      position: 'sticky', top: 0, background: 'var(--bg)'
+                    }}>
+                      {col.label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                    {columns.map(k => (
-                      <td key={k} style={{ padding: '6px 12px', whiteSpace: 'nowrap', fontFamily: TS_KEYS.includes(k) ? "'SF Mono','Fira Code',monospace" : undefined }}>
-                        {formatCell(r[k])}
-                      </td>
-                    ))}
+                {enriched.map((r, i) => (
+                  <tr
+                    key={i}
+                    style={{
+                      borderBottom: i === enriched.length - 1 ? 'none' : '1px solid var(--border)',
+                      background: i % 2 === 1 ? 'var(--bg)' : undefined
+                    }}
+                  >
+                    {columns.map(col => {
+                      const isTs = col.key === 'ts_combined'
+                      return (
+                        <td
+                          key={col.key}
+                          style={{
+                            padding: '8px 14px',
+                            whiteSpace: 'nowrap',
+                            textAlign: col.numeric ? 'right' : 'left',
+                            fontFamily: col.numeric ? "'SF Mono','Fira Code',monospace" : undefined,
+                            fontWeight: isTs ? 600 : 400,
+                            color: isTs ? 'var(--text)' : 'var(--text-secondary)',
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
+                          {col.key === 'test' || col.key === 'ts_combined' || col.key === 'model_filename'
+                            ? String(r[col.key] ?? '—')
+                            : formatCell(r[col.key])}
+                        </td>
+                      )
+                    })}
                   </tr>
                 ))}
               </tbody>
