@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore, ModelFileInfo, ModelDownloadInfo } from '../store/useStore'
 import {
   HardDrive, Download, Trash, Pause, Play, X, Link, FolderOpen,
-  Pencil, Check, AlertCircle, Loader2, RefreshCw
+  Pencil, Check, AlertCircle, Loader2, RefreshCw, Search
 } from 'lucide-react'
 function formatBytes(b: number) {
   if (!b) return '—'
@@ -223,6 +223,12 @@ export default function ModelsView() {
   const { models, setModels, modelDownloads, upsertModelDownload, paths } = useStore()
   const [showUrlModal, setShowUrlModal] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState('')
+  const filteredModels = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return models
+    return models.filter(m => m.name.toLowerCase().includes(q) || m.folder.toLowerCase().includes(q))
+  }, [models, filter])
   const refresh = useCallback(async () => {
     setLoading(true)
     const m = await window.api.listModels()
@@ -245,7 +251,7 @@ export default function ModelsView() {
         <div>
           <h1 className="page-title">Models</h1>
           <p className="page-subtitle">
-            {models.length} model{models.length !== 1 ? 's' : ''} installed
+            {filter ? `${filteredModels.length} of ${models.length}` : models.length} model{models.length !== 1 ? 's' : ''} installed
             {activeDownloads.length > 0 ? ` · ${activeDownloads.length} downloading` : ''}
           </p>
         </div>
@@ -275,6 +281,28 @@ export default function ModelsView() {
         <div className="models-section-title">
           <HardDrive size={13} /> Installed Models
         </div>
+        {models.length > 0 && (
+          <div className="params-search-box">
+            <Search size={16} style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Filter models by name or folder..."
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+            />
+            {filter && (
+              <button
+                className="btn btn-ghost btn-icon"
+                onClick={() => setFilter('')}
+                title="Clear filter"
+                style={{ padding: 4 }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
         {loading && models.length === 0 && (
           <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)', fontSize: 13 }}>
             <Loader2 size={16} className="spin" style={{ display: 'block', margin: '0 auto 8px' }} /> Loading...
@@ -290,7 +318,12 @@ export default function ModelsView() {
             </button>
           </div>
         )}
-        {models.map(m => (
+        {models.length > 0 && filteredModels.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: 13 }}>
+            No models match "{filter}"
+          </div>
+        )}
+        {filteredModels.map(m => (
           <ModelFileRow key={m.path} model={m} onDeleted={refresh} />
         ))}
       </div>
