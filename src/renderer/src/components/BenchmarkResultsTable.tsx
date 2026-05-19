@@ -100,6 +100,17 @@ export function rowsToMarkdown(rows: Record<string, unknown>[]): string {
 export default function BenchmarkResultsTable({ rows }: { rows: Record<string, unknown>[] }) {
   const enriched = useMemo(() => enrichRows(rows), [rows])
   const columns = useMemo(() => activeColumns(enriched), [enriched])
+  const bestByTest = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of enriched) {
+      const test = String(r.test || '')
+      const ts = Number(r.avg_ts)
+      if (!Number.isFinite(ts)) continue
+      const cur = m.get(test)
+      if (cur === undefined || ts > cur) m.set(test, ts)
+    }
+    return m
+  }, [enriched])
 
   if (!enriched.length) {
     return (
@@ -143,37 +154,45 @@ export default function BenchmarkResultsTable({ rows }: { rows: Record<string, u
           </tr>
         </thead>
         <tbody>
-          {enriched.map((r, i) => (
-            <tr
-              key={i}
-              style={{
-                borderBottom: i === enriched.length - 1 ? 'none' : '1px solid var(--border)',
-                background: i % 2 === 1 ? 'var(--bg)' : undefined
-              }}
-            >
-              {columns.map(col => {
-                const isTs = col.key === 'ts_combined'
-                return (
-                  <td
-                    key={col.key}
-                    style={{
-                      padding: '8px 14px',
-                      whiteSpace: 'nowrap',
-                      textAlign: col.numeric ? 'right' : 'left',
-                      fontFamily: col.numeric ? "'SF Mono','Fira Code',monospace" : undefined,
-                      fontWeight: isTs ? 600 : 400,
-                      color: isTs ? 'var(--text)' : 'var(--text-secondary)',
-                      fontVariantNumeric: 'tabular-nums'
-                    }}
-                  >
-                    {col.key === 'test' || col.key === 'ts_combined' || col.key === 'model_filename'
-                      ? String(r[col.key] ?? '—')
-                      : formatCell(r[col.key])}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
+          {enriched.map((r, i) => {
+            const isBest = bestByTest.get(String(r.test)) === Number(r.avg_ts)
+            return (
+              <tr
+                key={i}
+                style={{
+                  borderBottom: i === enriched.length - 1 ? 'none' : '1px solid var(--border)',
+                  background: isBest
+                    ? 'rgba(22,163,74,0.08)'
+                    : (i % 2 === 1 ? 'var(--bg)' : undefined),
+                  boxShadow: isBest ? 'inset 3px 0 0 var(--success)' : undefined
+                }}
+              >
+                {columns.map(col => {
+                  const isTs = col.key === 'ts_combined'
+                  return (
+                    <td
+                      key={col.key}
+                      style={{
+                        padding: '8px 14px',
+                        whiteSpace: 'nowrap',
+                        textAlign: col.numeric ? 'right' : 'left',
+                        fontFamily: col.numeric ? "'SF Mono','Fira Code',monospace" : undefined,
+                        fontWeight: isTs ? 600 : 400,
+                        color: isTs ? 'var(--text)' : 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums'
+                      }}
+                    >
+                      {col.key === 'test' || col.key === 'ts_combined' || col.key === 'model_filename'
+                        ? (isTs && isBest
+                            ? <><span style={{ color: 'var(--success)', marginRight: 4 }}>★</span>{String(r[col.key] ?? '—')}</>
+                            : String(r[col.key] ?? '—'))
+                        : formatCell(r[col.key])}
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
