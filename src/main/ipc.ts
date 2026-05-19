@@ -487,6 +487,77 @@ export function registerIpcHandlers(): void {
     }
   })
   
+  // Shared in-memory store; the popup results window pulls from it on load.
+  let latestBenchResults: unknown[] = []
+  function openBenchResultsWindow() {
+    const candidates = [
+      join(process.cwd(), 'assets', 'icon.png'),
+      join(__dirname, '../../assets/icon.png'),
+      join(app.getAppPath(), 'assets', 'icon.png')
+    ]
+    const icon = candidates.find(existsSync)
+    const win = new BrowserWindow({
+      width: 1100, height: 700, show: true, autoHideMenuBar: true,
+      title: 'Hexllama — Benchmark Results',
+      titleBarStyle: 'hiddenInset',
+      backgroundColor: '#f5f5f5',
+      ...(icon ? { icon } : {}),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    })
+    const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+    if (rendererUrl) {
+      win.loadURL(`${rendererUrl}?bench_results=1`)
+    } else {
+      win.loadFile(join(__dirname, '../renderer/index.html'), { query: { bench_results: '1' } })
+    }
+  }
+  ipcMain.handle('bench-show-results', (_e, rows: unknown[]) => {
+    latestBenchResults = Array.isArray(rows) ? rows : []
+    openBenchResultsWindow()
+    return { success: true }
+  })
+  ipcMain.handle('get-latest-bench-results', () => latestBenchResults)
+  ipcMain.handle('bench-export-markdown', async (event, content: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || undefined
+    const r = await dialog.showSaveDialog(win as BrowserWindow, {
+      title: 'Export Results to Markdown',
+      defaultPath: `benchmark-${Date.now()}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    })
+    if (r.canceled || !r.filePath) return { success: false, canceled: true }
+    try {
+      await fsPromises.writeFile(r.filePath, content, 'utf-8')
+      return { success: true, path: r.filePath }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+  ipcMain.handle('bench-export-pdf', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: 'Window not found' }
+    const r = await dialog.showSaveDialog(win, {
+      title: 'Export Results to PDF',
+      defaultPath: `benchmark-${Date.now()}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    })
+    if (r.canceled || !r.filePath) return { success: false, canceled: true }
+    try {
+      const buf = await event.sender.printToPDF({
+        printBackground: true,
+        pageSize: 'Letter',
+        landscape: true
+      })
+      await fsPromises.writeFile(r.filePath, buf)
+      return { success: true, path: r.filePath }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
   function openChatWindow(port: number) {
     const chatUrl = `http://127.0.0.1:${port}`
     const candidates = [
