@@ -607,7 +607,7 @@ export function registerIpcHandlers(): void {
     if (!isSafePath(BACKEND_DIR, binPath)) return { success: false, error: 'Access denied' }
     if (!existsSync(binPath)) return { success: false, error: `llama-bench not found at ${binPath}` }
     if (!opts.modelPath || !existsSync(opts.modelPath)) return { success: false, error: 'Model file not found' }
-    const args = ['-m', opts.modelPath, '-o', 'json']
+    const args = ['-m', opts.modelPath, '-o', 'json', '--progress']
     if (opts.reps && opts.reps > 0) args.push('-r', String(opts.reps))
     for (const [k, v] of Object.entries(opts.params || {})) {
       const trimmed = (v || '').trim()
@@ -616,9 +616,22 @@ export function registerIpcHandlers(): void {
     return new Promise<{ success: boolean; rows?: unknown[]; error?: string }>((resolve) => {
       let stdout = ''
       let stderr = ''
+      let stderrCarry = ''  // partial line accumulator across chunk boundaries
       const proc = spawn(binPath, args, { stdio: 'pipe', cwd: dirname(binPath) })
       proc.stdout?.on('data', d => { stdout += d.toString() })
-      proc.stderr?.on('data', d => { stderr += d.toString() })
+      proc.stderr?.on('data', d => {
+        const text = d.toString()
+        stderr += text
+        stderrCarry += text
+        const lines = stderrCarry.split('\n')
+        // keep the last (possibly incomplete) fragment for the next chunk
+        stderrCarry = lines.pop() || ''
+        for (const raw of lines) {
+          const line = raw.trim()
+          if (!line) continue
+          try { _e.sender.send('bench-progress', { line }) } catch {}
+        }
+      })
       proc.on('error', err => resolve({ success: false, error: String(err) }))
       proc.on('exit', code => {
         if (code !== 0) {
