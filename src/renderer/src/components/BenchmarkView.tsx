@@ -114,14 +114,20 @@ export default function BenchmarkView() {
   const [running, setRunning] = useState(false)
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [error, setError] = useState('')
-  const [progressLine, setProgressLine] = useState('')
+  const [progressLines, setProgressLines] = useState<string[]>([])
   const [elapsed, setElapsed] = useState(0)
   const [errorCopied, setErrorCopied] = useState(false)
   const startedAt = useRef<number>(0)
 
   useEffect(() => {
     if (typeof window.api.onBenchProgress !== 'function') return
-    window.api.onBenchProgress(({ line }) => setProgressLine(line))
+    window.api.onBenchProgress(({ line }) => {
+      setProgressLines(prev => {
+        // keep the last 12 lines so we have context for the failure
+        const next = [...prev, line]
+        return next.length > 12 ? next.slice(next.length - 12) : next
+      })
+    })
     return () => window.api.removeBenchProgressListener?.()
   }, [])
 
@@ -150,7 +156,7 @@ export default function BenchmarkView() {
   })()
 
   async function handleRun() {
-    setError(''); setRows([]); setProgressLine('')
+    setError(''); setRows([]); setProgressLines([])
     const backend = backends.find(b => b.name === backendName) || activeBackend
     if (!backend) { setError('No backend selected.'); return }
     if (!modelPath) { setError('Select a model.'); return }
@@ -313,34 +319,87 @@ export default function BenchmarkView() {
         )}
       </div>
 
-      {running && (
-        <div
-          style={{
-            position: 'sticky',
-            bottom: 16,
-            zIndex: 999,
-            marginTop: 16,
-            padding: '12px 16px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--accent)',
-            borderRadius: 'var(--radius-sm)',
-            boxShadow: 'var(--shadow-md)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12
-          }}
-        >
-          <Loader2 size={16} className="spin" style={{ flexShrink: 0, color: 'var(--accent)' }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2, fontSize: 13 }}>
-              {progressLine || 'Loading model…'}
+      {running && (() => {
+        // Build a one-line summary of the active sweep so the user can see
+        // *what's being swept* when a failure mid-run kills the run.
+        const sweepSummary = SWEEP_PARAMS
+          .map(p => {
+            const v = (params[p.flag] || '').trim()
+            return v ? `${p.flag} { ${v} }` : null
+          })
+          .filter(Boolean)
+          .join(' · ')
+        const latest = progressLines[progressLines.length - 1] || 'Loading model…'
+        const recent = progressLines.slice(-4)
+        return (
+          <div
+            style={{
+              position: 'sticky',
+              bottom: 16,
+              zIndex: 999,
+              marginTop: 16,
+              padding: '12px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--accent)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: 'var(--shadow-md)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <Loader2 size={16} className="spin" style={{ flexShrink: 0, color: 'var(--accent)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {latest}
+                </div>
+                <div style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {Math.floor(elapsed / 60)}m {String(elapsed % 60).padStart(2, '0')}s elapsed
+                </div>
+              </div>
             </div>
-            <div style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'var(--text-secondary)' }}>
-              {Math.floor(elapsed / 60)}m {String(elapsed % 60).padStart(2, '0')}s elapsed
-            </div>
+            {sweepSummary && (
+              <div style={{
+                marginTop: 6,
+                padding: '6px 10px',
+                background: 'var(--bg)',
+                borderRadius: 6,
+                fontSize: 11,
+                color: 'var(--text-secondary)',
+                fontFamily: "'SF Mono','Fira Code',monospace",
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
+              }}>
+                <span style={{ color: 'var(--text-muted)' }}>Sweep:</span> {sweepSummary}
+              </div>
+            )}
+            {recent.length > 1 && (
+              <div style={{
+                marginTop: 8,
+                padding: '6px 10px',
+                background: 'var(--bg)',
+                borderRadius: 6,
+                fontSize: 11,
+                color: 'var(--text-secondary)',
+                fontFamily: "'SF Mono','Fira Code',monospace",
+                maxHeight: 90,
+                overflow: 'auto',
+                userSelect: 'text',
+                WebkitUserSelect: 'text'
+              } as React.CSSProperties}>
+                {recent.map((l, i) => (
+                  <div key={i} style={{
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    opacity: i === recent.length - 1 ? 1 : 0.55
+                  }}>
+                    {l}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {error && (
         <div
