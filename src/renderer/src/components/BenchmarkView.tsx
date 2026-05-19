@@ -401,47 +401,100 @@ export default function BenchmarkView() {
         )
       })()}
 
-      {error && (
-        <div
-          className="hub-error"
-          style={{
-            marginTop: 16,
-            alignItems: 'flex-start',
-            gap: 10,
-            padding: '12px 14px'
-          }}
-        >
-          <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-          <pre
+      {error && (() => {
+        const sweepSummary = SWEEP_PARAMS
+          .map(p => {
+            const v = (params[p.flag] || '').trim()
+            return v ? `${p.flag} { ${v} }` : null
+          })
+          .filter(Boolean)
+          .join(' · ')
+        const lastFew = progressLines.slice(-6)
+        const fullCopy =
+          (sweepSummary ? `Sweep: ${sweepSummary}\n\n` : '') +
+          (lastFew.length ? `Last lines before failure:\n${lastFew.join('\n')}\n\n` : '') +
+          error
+        return (
+          <div
+            className="hub-error"
             style={{
-              flex: 1,
-              margin: 0,
-              fontFamily: "'SF Mono','Fira Code',monospace",
-              fontSize: 12,
-              lineHeight: 1.45,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              userSelect: 'text',
-              WebkitUserSelect: 'text',
-              cursor: 'text'
+              marginTop: 16,
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '12px 14px',
+              flexDirection: 'column'
             } as React.CSSProperties}
           >
-            {error}
-          </pre>
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={() => {
-              navigator.clipboard.writeText(error)
-              setErrorCopied(true)
-              setTimeout(() => setErrorCopied(false), 1500)
-            }}
-            title="Copy error"
-            style={{ flexShrink: 0, padding: 6 }}
-          >
-            {errorCopied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
-        </div>
-      )}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%' }}>
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <pre
+                style={{
+                  flex: 1,
+                  margin: 0,
+                  fontFamily: "'SF Mono','Fira Code',monospace",
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
+                  cursor: 'text'
+                } as React.CSSProperties}
+              >
+                {error}
+              </pre>
+              <button
+                className="btn btn-ghost btn-icon"
+                onClick={() => {
+                  navigator.clipboard.writeText(fullCopy)
+                  setErrorCopied(true)
+                  setTimeout(() => setErrorCopied(false), 1500)
+                }}
+                title="Copy error + sweep + recent log"
+                style={{ flexShrink: 0, padding: 6 }}
+              >
+                {errorCopied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+            {sweepSummary && (
+              <div style={{
+                width: '100%',
+                marginTop: 4,
+                padding: '8px 10px',
+                background: 'rgba(0,0,0,0.04)',
+                borderRadius: 6,
+                fontSize: 11,
+                fontFamily: "'SF Mono','Fira Code',monospace",
+                color: 'var(--text)',
+                userSelect: 'text',
+                WebkitUserSelect: 'text',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
+              } as React.CSSProperties}>
+                <span style={{ opacity: 0.6 }}>Sweep at time of failure:</span> {sweepSummary}
+              </div>
+            )}
+            {lastFew.length > 0 && (
+              <div style={{
+                width: '100%',
+                padding: '8px 10px',
+                background: 'rgba(0,0,0,0.04)',
+                borderRadius: 6,
+                fontSize: 11,
+                fontFamily: "'SF Mono','Fira Code',monospace",
+                color: 'var(--text-secondary)',
+                userSelect: 'text',
+                WebkitUserSelect: 'text',
+                maxHeight: 140,
+                overflow: 'auto'
+              } as React.CSSProperties}>
+                <div style={{ opacity: 0.6, marginBottom: 4 }}>Last {lastFew.length} llama-bench lines:</div>
+                {lastFew.map((l, i) => <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{l}</div>)}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {rows.length > 0 && (
         <div
