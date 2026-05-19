@@ -18,9 +18,9 @@ const SWEEP_PARAMS: SweepParam[] = [
   { flag: '-ub',   label: 'Micro-Batch', placeholder: 'e.g. 256,512',  defaultValue: '512',  validValues: '1..65536, ≤ batch' },
   { flag: '-p',    label: 'Prompt Size', placeholder: 'e.g. 128,1024', defaultValue: '512',  validValues: '≥ 0' },
   { flag: '-n',    label: 'Gen Size',    placeholder: 'e.g. 32,64',    defaultValue: '128',  validValues: '≥ 0' },
-  { flag: '-fa',   label: 'Flash Attn',  placeholder: 'e.g. 0,1',      defaultValue: '0',    validValues: '0 | 1' },
-  { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 | q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
-  { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 | q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
+  { flag: '-fa',   label: 'Flash Attn',  placeholder: 'e.g. 0,1',      defaultValue: '0',    validValues: '0 | 1 — required = 1 for any non-f16/f32/bf16 KV cache type' },
+  { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
+  { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1' },
 ]
 
 export default function BenchmarkView() {
@@ -50,6 +50,22 @@ export default function BenchmarkView() {
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 500)
     return () => clearInterval(t)
   }, [running])
+
+  // Detect the most common llama-bench config trap: quantized KV cache without
+  // Flash Attention enabled. llama.cpp refuses context init with that combo.
+  const kvFaWarning = (() => {
+    const FA_REQUIRED = /^(q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1)$/
+    const sweep = (s: string) => s.split(',').map(t => t.trim()).filter(Boolean)
+    const ctkVals = sweep(params['-ctk'] || '')
+    const ctvVals = sweep(params['-ctv'] || '')
+    const usesQuantKV = [...ctkVals, ...ctvVals].some(v => FA_REQUIRED.test(v))
+    if (!usesQuantKV) return null
+    const faVals = sweep(params['-fa'] || '')
+    // OK if all FA values are exactly "1". (If sweep includes both 0 and 1, fa=0 runs will fail.)
+    const allFaOne = faVals.length > 0 && faVals.every(v => v === '1')
+    if (allFaOne) return null
+    return 'Quantized KV cache types (q4_*, q5_*, q8_0, iq4_nl) require Flash Attn = 1. Set the Flash Attn field to "1" (or include "1" in the sweep — but "0" runs against these KV types will fail).'
+  })()
 
   async function handleRun() {
     setError(''); setRows([]); setProgressLine('')
@@ -171,6 +187,23 @@ export default function BenchmarkView() {
           })}
         </div>
       </div>
+
+      {kvFaWarning && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: '10px 14px',
+            background: 'rgba(217,119,6,0.08)',
+            border: '1.5px solid rgba(217,119,6,0.35)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--warning)',
+            fontSize: 12,
+            lineHeight: 1.5
+          }}
+        >
+          ⚠ {kvFaWarning}
+        </div>
+      )}
 
       <div style={{ marginTop: 20, display: 'flex', gap: 12, alignItems: 'center' }}>
         <button
