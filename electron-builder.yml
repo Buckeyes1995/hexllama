@@ -6,6 +6,9 @@ files:
   - out/main/**/*
   - out/preload/**/*
   - out/renderer/**/*
+extraResources:
+  - from: resources/
+    to: resources/
 win:
   target:
     - target: nsis
@@ -24,7 +27,7 @@ nsis:
   deleteAppDataOnUninstall: false
 mac:
   target: dmg
-  icon: assets/icon_256.png
+  icon: assets/icon_1024.png
 linux:
   target: AppImage
   icon: assets/icon_256.png

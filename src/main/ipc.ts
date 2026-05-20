@@ -1,7 +1,7 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import {
   existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync,
-  unlinkSync, createWriteStream, statSync, rmdirSync, renameSync
+  unlinkSync, createWriteStream, statSync, rmdirSync, renameSync, promises as fsPromises
 } from 'fs'
 import { join, extname, basename, dirname, resolve } from 'path'
 import { spawn, ChildProcess } from 'child_process'
@@ -9,17 +9,49 @@ import https from 'https'
 import http from 'http'
 import { app } from 'electron'
 import extract from 'extract-zip'
+import net from 'net'
 const APP_ROOT = app.isPackaged ? join(app.getPath('userData')) : join(process.cwd())
 const MODELS_DIR    = join(APP_ROOT, 'models')
 const TEMPLATES_DIR = join(APP_ROOT, 'templates')
 const BACKEND_DIR   = join(APP_ROOT, 'backend')
+const SETTINGS_PATH = join(APP_ROOT, 'settings.json')
 for (const dir of [MODELS_DIR, TEMPLATES_DIR, BACKEND_DIR]) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 function isSafePath(base: string, target: string): boolean {
   return resolve(target).startsWith(resolve(base))
 }
+interface AppSettings { externalModelFolders: string[] }
+async function loadSettings(): Promise<AppSettings> {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return { externalModelFolders: [] }
+    const data = JSON.parse(await fsPromises.readFile(SETTINGS_PATH, 'utf-8'))
+    return { externalModelFolders: Array.isArray(data.externalModelFolders) ? data.externalModelFolders : [] }
+  } catch { return { externalModelFolders: [] } }
+}
+async function saveSettings(s: AppSettings): Promise<void> {
+  await fsPromises.writeFile(SETTINGS_PATH, JSON.stringify(s, null, 2))
+}
 const runningProcesses = new Map<string, ChildProcess>()
+let sharedChatWindow: BrowserWindow | null = null
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false)
+      } else {
+        resolve(true)
+      }
+    })
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(true)
+      })
+    })
+    server.listen(port, '127.0.0.1')
+  })
+}
 interface DownloadTask {
   id: string
   url: string
@@ -130,23 +162,50 @@ function startDownload(
 }
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle('list-models', () => {
-    if (!existsSync(MODELS_DIR)) return []
+  ipcMain.handle('list-models', async () => {
     const exts = ['.gguf', '.bin', '.ggml']
-    const results: { name: string; path: string; size: number; folder: string }[] = []
-    const scan = (dir: string) => {
+    const results: { name: string; path: string; size: number; folder: string; external: boolean }[] = []
+    const seen = new Set<string>()
+    const scan = async (dir: string, external: boolean) => {
       try {
-        for (const e of readdirSync(dir, { withFileTypes: true })) {
-          if (e.isDirectory()) scan(join(dir, e.name))
+        const files = await fsPromises.readdir(dir, { withFileTypes: true })
+        for (const e of files) {
+          if (e.isDirectory()) await scan(join(dir, e.name), external)
           else if (exts.includes(extname(e.name).toLowerCase()) && !e.name.endsWith('.tmp')) {
             const fp = join(dir, e.name)
-            results.push({ name: e.name, path: fp, size: statSync(fp).size, folder: basename(dir) })
+            const key = resolve(fp)
+            if (seen.has(key)) continue
+            seen.add(key)
+            const st = await fsPromises.stat(fp)
+            results.push({ name: e.name, path: fp, size: st.size, folder: basename(dir), external })
           }
         }
       } catch {}
     }
-    scan(MODELS_DIR)
+    if (existsSync(MODELS_DIR)) await scan(MODELS_DIR, false)
+    const settings = await loadSettings()
+    for (const folder of settings.externalModelFolders) {
+      if (existsSync(folder)) await scan(folder, true)
+    }
     return results
+  })
+  ipcMain.handle('list-external-model-folders', async () => (await loadSettings()).externalModelFolders)
+  ipcMain.handle('add-external-model-folder', async () => {
+    const r = await dialog.showOpenDialog({ title: 'Add External Model Folder', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths.length) return { success: false }
+    const folder = r.filePaths[0]
+    const s = await loadSettings()
+    if (!s.externalModelFolders.includes(folder)) {
+      s.externalModelFolders.push(folder)
+      await saveSettings(s)
+    }
+    return { success: true, folders: s.externalModelFolders }
+  })
+  ipcMain.handle('remove-external-model-folder', async (_e, folder: string) => {
+    const s = await loadSettings()
+    s.externalModelFolders = s.externalModelFolders.filter(f => f !== folder)
+    await saveSettings(s)
+    return { success: true, folders: s.externalModelFolders }
   })
   ipcMain.handle('delete-model', (_e, filePath: string) => {
     try {
@@ -360,7 +419,9 @@ export function registerIpcHandlers(): void {
     const commandsPath = join(BACKEND_DIR, backendName, 'commands.json')
     if (!isSafePath(BACKEND_DIR, commandsPath)) return null
     if (existsSync(commandsPath)) return JSON.parse(readFileSync(commandsPath, 'utf-8'))
-    const defaultPath = join(APP_ROOT, 'resources', 'commands.json')
+    const defaultPath = app.isPackaged
+      ? join(process.resourcesPath, 'resources', 'commands.json')
+      : join(process.cwd(), 'resources', 'commands.json')
     if (existsSync(defaultPath)) return JSON.parse(readFileSync(defaultPath, 'utf-8'))
     return null
   })
@@ -414,13 +475,55 @@ export function registerIpcHandlers(): void {
     if (r.canceled || !r.filePaths.length) return null
     return { name: basename(r.filePaths[0]), path: r.filePaths[0] }
   })
-  ipcMain.handle('run-model', (_e, opts: { id: string; backendPath: string; exe: string; args: string[]; openBrowser: boolean; port: number }) => {
+  ipcMain.handle('run-model', async (_e, opts: { id: string; name: string; backendPath: string; exe: string; args: string[]; openBrowser: boolean; port: number }) => {
     if (runningProcesses.has(opts.id)) return { success: false, error: 'Already running' }
+    const port = opts.port || 8080
+    let available = await isPortAvailable(port)
+    let finalPort = port
+    let finalArgs = [...opts.args]
+
+    if (!available) {
+      const response = await dialog.showMessageBox({
+        type: 'question',
+        buttons: ['Yes', 'No'],
+        defaultId: 0,
+        title: 'Port Conflict',
+        message: `Port ${port} is already in use by another running model or process.`,
+        detail: `Would you like to temporarily allocate a different available port for "${opts.name}"?`,
+        cancelId: 1
+      })
+      if (response.response === 0) {
+        let tempPort = port + 1
+        while (tempPort < 65535) {
+          if (await isPortAvailable(tempPort)) {
+            break
+          }
+          tempPort++
+        }
+        finalPort = tempPort
+        // Update the --port parameter in finalArgs
+        const portIdx = finalArgs.indexOf('--port')
+        if (portIdx !== -1 && portIdx + 1 < finalArgs.length) {
+          finalArgs[portIdx + 1] = String(finalPort)
+        } else {
+          const shortPortIdx = finalArgs.indexOf('-p')
+          if (shortPortIdx !== -1 && shortPortIdx + 1 < finalArgs.length) {
+            finalArgs[shortPortIdx + 1] = String(finalPort)
+          } else {
+            finalArgs.push('--port', String(finalPort))
+          }
+        }
+        available = true
+      } else {
+        return { success: false, error: `Port ${port} is already in use.` }
+      }
+    }
+
     const exePath = join(opts.backendPath, opts.exe)
     if (!isSafePath(BACKEND_DIR, exePath)) return { success: false, error: 'Access denied' }
     if (!existsSync(exePath)) return { success: false, error: `Executable not found: ${exePath}` }
     try {
-      const proc = spawn(exePath, opts.args, { detached: false, stdio: 'pipe', cwd: dirname(exePath), windowsHide: false })
+      const proc = spawn(exePath, finalArgs, { detached: false, stdio: 'pipe', cwd: dirname(exePath), windowsHide: false })
       proc.stderr?.on('data', (d) => console.error('[llama-server]', d.toString()))
       proc.stdout?.on('data', (d) => console.log('[llama-server]', d.toString()))
       proc.on('error', (err: any) => {
@@ -433,13 +536,20 @@ export function registerIpcHandlers(): void {
         _e.sender.send('model-error', { id: opts.id, error: msg })
       })
       runningProcesses.set(opts.id, proc)
-      proc.on('exit', () => runningProcesses.delete(opts.id))
+      proc.on('exit', () => {
+        runningProcesses.delete(opts.id)
+        BrowserWindow.getAllWindows().forEach(win => {
+          win.webContents.send('model-exited', { id: opts.id })
+        })
+      })
       if (opts.openBrowser) {
         setTimeout(() => {
-          openChatWindow(opts.port)
+          if (runningProcesses.has(opts.id)) {
+            openChatWindow(finalPort, opts.name)
+          }
         }, 2500)
       }
-      return { success: true, pid: proc.pid }
+      return { success: true, pid: proc.pid, port: finalPort }
     } catch (err: any) {
       if (err.code === 'UNKNOWN' && opts.backendPath.toLowerCase().includes('arm64') && process.arch !== 'arm64') {
         return { success: false, error: 'Architecture mismatch: You are trying to run an ARM64 backend on an x64 system. Please delete this backend in Settings and download the x64 version.' }
@@ -448,8 +558,18 @@ export function registerIpcHandlers(): void {
     }
   })
   
-  function openChatWindow(port: number) {
+  function openChatWindow(port: number, name?: string) {
     const chatUrl = `http://127.0.0.1:${port}`
+    const templateName = name || `Port ${port}`
+    if (sharedChatWindow && !sharedChatWindow.isDestroyed()) {
+      if (sharedChatWindow.isMinimized()) {
+        sharedChatWindow.restore()
+      }
+      sharedChatWindow.show()
+      sharedChatWindow.focus()
+      sharedChatWindow.webContents.send('add-chat-tab', { url: chatUrl, name: templateName })
+      return
+    }
     const candidates = [
       join(process.cwd(), 'assets', 'icon.png'),                  
       join(__dirname, '../../assets/icon.png'),                    
@@ -457,12 +577,88 @@ export function registerIpcHandlers(): void {
     ]
     const icon = candidates.find(existsSync)
     
-    const chatWin = new BrowserWindow({
-      width: 1024, height: 768, show: true, autoHideMenuBar: true,
+    let x: number | undefined
+    let y: number | undefined
+    const width = 1024
+    const height = 768
+    const mainWin = BrowserWindow.getAllWindows().find(w => {
+      try {
+        const url = w.webContents.getURL()
+        return !url.includes('chat_url')
+      } catch {
+        return false
+      }
+    })
+    if (mainWin && !mainWin.isDestroyed()) {
+      const bounds = mainWin.getBounds()
+      x = Math.round(bounds.x + (bounds.width - width) / 2)
+      y = Math.round(bounds.y + (bounds.height - height) / 2)
+    }
+    
+    sharedChatWindow = new BrowserWindow({
+      width, height, show: true, autoHideMenuBar: true,
       title: 'Hexllama - Llama-UI',
       titleBarStyle: 'hiddenInset',
       backgroundColor: '#ffffff',
       ...(icon ? { icon } : {}),
+      ...(x !== undefined && y !== undefined ? { x, y } : {}),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    })
+    sharedChatWindow.on('closed', () => {
+      sharedChatWindow = null
+    })
+    const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+    if (rendererUrl) {
+      sharedChatWindow.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}&name=${encodeURIComponent(templateName)}`)
+    } else {
+      sharedChatWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl, name: templateName } })
+    }
+  }
+
+  ipcMain.handle('open-chat-window', (_e, port: number, name: string) => {
+    openChatWindow(port, name)
+  })
+
+  ipcMain.handle('open-detached-chat-window', (_e, port: number, name: string) => {
+    const chatUrl = `http://127.0.0.1:${port}`
+    const templateName = name || `Port ${port}`
+    const candidates = [
+      join(process.cwd(), 'assets', 'icon.png'),                  
+      join(__dirname, '../../assets/icon.png'),                    
+      join(app.getAppPath(), 'assets', 'icon.png')                 
+    ]
+    const icon = candidates.find(existsSync)
+    
+    let x: number | undefined
+    let y: number | undefined
+    const width = 1024
+    const height = 768
+    const mainWin = BrowserWindow.getAllWindows().find(w => {
+      try {
+        const url = w.webContents.getURL()
+        return !url.includes('chat_url')
+      } catch {
+        return false
+      }
+    })
+    if (mainWin && !mainWin.isDestroyed()) {
+      const bounds = mainWin.getBounds()
+      x = Math.round(bounds.x + (bounds.width - width) / 2)
+      y = Math.round(bounds.y + (bounds.height - height) / 2)
+    }
+    
+    const detachedWin = new BrowserWindow({
+      width, height, show: true, autoHideMenuBar: true,
+      title: 'Hexllama - Llama-UI',
+      titleBarStyle: 'hiddenInset',
+      backgroundColor: '#ffffff',
+      ...(icon ? { icon } : {}),
+      ...(x !== undefined && y !== undefined ? { x, y } : {}),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: false,
@@ -472,18 +668,22 @@ export function registerIpcHandlers(): void {
     })
     const rendererUrl = process.env['ELECTRON_RENDERER_URL']
     if (rendererUrl) {
-      chatWin.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}`)
+      detachedWin.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}&name=${encodeURIComponent(templateName)}&detached=true`)
     } else {
-      chatWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl } })
+      detachedWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl, name: templateName, detached: 'true' } })
     }
-  }
+  })
 
-  ipcMain.handle('open-chat-window', (_e, port: number) => {
-    openChatWindow(port)
+  ipcMain.handle('notify-tab-moved', (_e, url: string) => {
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('tab-moved-elsewhere', { url })
+      }
+    })
   })
   ipcMain.handle('stop-model', (_e, id: string) => {
     const proc = runningProcesses.get(id)
-    if (!proc) return { success: false, error: 'Not running' }
+    if (!proc) return { success: true, alreadyStopped: true }
     proc.kill(); runningProcesses.delete(id)
     return { success: true }
   })
@@ -491,14 +691,30 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('check-updates', async () => {
     try {
-      const release = await fetchJson('https://api.github.com/repos/ggerganov/llama.cpp/releases/latest') as any
+      const release = await fetchJson('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest') as any
       if (!release || !release.assets) return { error: 'Invalid response from GitHub' }
-      const windowsAssets = release.assets.filter((a: any) => {
-        const lowerName = a.name.toLowerCase()
-        const isWin = lowerName.endsWith('.zip') && !lowerName.startsWith('cudart-') && (lowerName.includes('win') || lowerName.includes('windows'))
-        if (!isWin) return false
-        if (process.arch === 'x64' && lowerName.includes('arm64')) return false
-        if (process.arch === 'arm64' && lowerName.includes('x64')) return false
+      const isMac = process.platform === 'darwin'
+      const isLinux = process.platform === 'linux'
+      const arch = process.arch
+      const platformAssets = release.assets.filter((a: any) => {
+        const n = a.name.toLowerCase()
+        if (n.startsWith('cudart-')) return false
+        if (isMac) {
+          if (!n.endsWith('.tar.gz') || !n.includes('macos')) return false
+          if (arch === 'arm64' && !n.includes('arm64')) return false
+          if (arch === 'x64' && !n.includes('x64')) return false
+          return true
+        }
+        if (isLinux) {
+          if (!n.endsWith('.tar.gz') || !n.includes('ubuntu')) return false
+          if (arch === 'arm64' && !n.includes('arm64')) return false
+          if (arch === 'x64' && n.includes('arm64')) return false
+          return true
+        }
+        if (!n.endsWith('.zip')) return false
+        if (!(n.includes('win') || n.includes('windows'))) return false
+        if (arch === 'x64' && n.includes('arm64')) return false
+        if (arch === 'arm64' && n.includes('x64')) return false
         return true
       })
       const latestNum = parseInt(release.tag_name.replace(/^b/, ''), 10)
@@ -509,29 +725,38 @@ export function registerIpcHandlers(): void {
           if (parseInt(m[1], 10) >= latestNum || d.name.includes(release.tag_name)) { isNewer = false; break }
         }
       }
-      return { tagName: release.tag_name, name: release.name, url: release.html_url, publishedAt: release.published_at, isNewer, assets: windowsAssets.map((a: any) => ({ name: a.name, downloadUrl: a.browser_download_url, size: a.size })) }
+      return { tagName: release.tag_name, name: release.name, url: release.html_url, publishedAt: release.published_at, isNewer, assets: platformAssets.map((a: any) => ({ name: a.name, downloadUrl: a.browser_download_url, size: a.size })) }
     } catch (err) { return { error: String(err) } }
   })
   ipcMain.handle('download-release', async (event, opts: { url: string; version: string; assetName: string }) => {
-    const zipPath = join(app.getPath('temp'), opts.assetName)
+    const archivePath = join(app.getPath('temp'), opts.assetName)
     const extractPath = join(BACKEND_DIR, opts.version)
+    const isTarGz = opts.assetName.toLowerCase().endsWith('.tar.gz')
     try {
       event.sender.send('download-progress', { percent: 0, phase: 'downloading' })
       await new Promise<void>((resolve, reject) => {
-        cancelBackendDl = startDownload(opts.url, zipPath, 0,
+        cancelBackendDl = startDownload(opts.url, archivePath, 0,
           (r, t) => event.sender.send('download-progress', { percent: t > 0 ? Math.round(r / t * 100) : 0, phase: 'downloading' }),
           resolve, reject)
       })
       cancelBackendDl = null
       event.sender.send('download-progress', { percent: 100, phase: 'extracting' })
       if (!existsSync(extractPath)) mkdirSync(extractPath, { recursive: true })
-      await extract(zipPath, { dir: extractPath })
-      try { unlinkSync(zipPath) } catch {}
+      if (isTarGz) {
+        await new Promise<void>((resolve, reject) => {
+          const p = spawn('tar', ['-xzf', archivePath, '-C', extractPath], { stdio: 'pipe' })
+          p.on('error', reject)
+          p.on('exit', code => code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`)))
+        })
+      } else {
+        await extract(archivePath, { dir: extractPath })
+      }
+      try { unlinkSync(archivePath) } catch (e) { console.error('Failed to cleanup temp file', e) }
       return { success: true, path: extractPath }
-    } catch (err) { 
+    } catch (err) {
       cancelBackendDl = null
-      try { unlinkSync(zipPath) } catch {}
-      return { success: false, error: String(err) } 
+      try { unlinkSync(archivePath) } catch (e) { console.error('Failed to cleanup temp file', e) }
+      return { success: false, error: String(err) }
     }
   })
   ipcMain.handle('cancel-backend-download', () => {
@@ -608,4 +833,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('hf-open-models-dir', () => shell.openPath(MODELS_DIR))
   ipcMain.handle('onDownloadProgress', () => {})
   ipcMain.handle('removeDownloadListener', () => {})
+  ipcMain.handle('get-version', () => app.getVersion())
 }

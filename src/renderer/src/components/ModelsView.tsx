@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore, ModelFileInfo, ModelDownloadInfo } from '../store/useStore'
 import {
   HardDrive, Download, Trash, Pause, Play, X, Link, FolderOpen,
-  Pencil, Check, AlertCircle, Loader2, RefreshCw
+  Pencil, Check, AlertCircle, Loader2, RefreshCw, Search, FilePlus, FileText
 } from 'lucide-react'
 function formatBytes(b: number) {
   if (!b) return '—'
@@ -179,8 +179,13 @@ function DownloadRow({ dl }: { dl: ModelDownloadInfo }) {
 }
 
 function ModelFileRow({ model, onDeleted }: { model: ModelFileInfo; onDeleted: () => void }) {
+  const { cards, setShowCreateModal, setView, setPrefillModelPath } = useStore()
   const [editing, setEditing] = useState(false)
   const [newName, setNewName] = useState(model.name.replace(/\.[^.]+$/, ''))
+  const existingTemplate = useMemo(
+    () => cards.find(c => c.template.modelPath === model.path)?.template ?? null,
+    [cards, model.path]
+  )
   async function handleDelete() {
     if (!confirm(`Delete "${model.name}"? This cannot be undone.`)) return
     const res = await window.api.deleteModel(model.path)
@@ -192,6 +197,15 @@ function ModelFileRow({ model, onDeleted }: { model: ModelFileInfo; onDeleted: (
     const res = await window.api.renameModel(model.path, newName.trim())
     if (res.success) { setEditing(false); onDeleted()  }
     else alert('Rename failed: ' + res.error)
+  }
+  function handleTemplate() {
+    setView('cards')
+    if (existingTemplate) {
+      setShowCreateModal(true, existingTemplate)
+    } else {
+      setPrefillModelPath(model.path)
+      setShowCreateModal(true, null)
+    }
   }
   return (
     <div className="models-file-row">
@@ -208,13 +222,21 @@ function ModelFileRow({ model, onDeleted }: { model: ModelFileInfo; onDeleted: (
         )}
         <div className="models-file-sub">
           <span className="models-folder-badge">{model.folder}</span>
+          {model.external && <span className="models-folder-badge" title="Model from an external folder — will not be renamed or deleted by the app">External</span>}
           <span>{formatBytes(model.size)}</span>
         </div>
       </div>
       <div className="models-file-actions">
-        <button className="btn btn-ghost btn-icon" onClick={() => setEditing(true)} title="Rename"><Pencil size={14} /></button>
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={handleTemplate}
+          title={existingTemplate ? `Edit template "${existingTemplate.name}"` : 'Create a new template for this model'}
+        >
+          {existingTemplate ? <FileText size={14} /> : <FilePlus size={14} />}
+        </button>
+        <button className="btn btn-ghost btn-icon" onClick={() => setEditing(true)} title={model.external ? 'Rename disabled for external models' : 'Rename'} disabled={model.external}><Pencil size={14} /></button>
         <button className="btn btn-ghost btn-icon" onClick={() => window.api.openFolder(model.path.substring(0, model.path.lastIndexOf('/') === -1 ? model.path.lastIndexOf('\\') : model.path.lastIndexOf('/')))} title="Open folder"><FolderOpen size={14} /></button>
-        <button className="btn btn-ghost btn-icon text-danger" onClick={handleDelete} title="Delete"><Trash size={14} /></button>
+        <button className="btn btn-ghost btn-icon text-danger" onClick={handleDelete} title={model.external ? 'Delete disabled for external models' : 'Delete'} disabled={model.external}><Trash size={14} /></button>
       </div>
     </div>
   )
@@ -223,6 +245,12 @@ export default function ModelsView() {
   const { models, setModels, modelDownloads, upsertModelDownload, paths } = useStore()
   const [showUrlModal, setShowUrlModal] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState('')
+  const filteredModels = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return models
+    return models.filter(m => m.name.toLowerCase().includes(q) || m.folder.toLowerCase().includes(q))
+  }, [models, filter])
   const refresh = useCallback(async () => {
     setLoading(true)
     const m = await window.api.listModels()
@@ -245,7 +273,7 @@ export default function ModelsView() {
         <div>
           <h1 className="page-title">Models</h1>
           <p className="page-subtitle">
-            {models.length} model{models.length !== 1 ? 's' : ''} installed
+            {filter ? `${filteredModels.length} of ${models.length}` : models.length} model{models.length !== 1 ? 's' : ''} installed
             {activeDownloads.length > 0 ? ` · ${activeDownloads.length} downloading` : ''}
           </p>
         </div>
@@ -275,6 +303,28 @@ export default function ModelsView() {
         <div className="models-section-title">
           <HardDrive size={13} /> Installed Models
         </div>
+        {models.length > 0 && (
+          <div className="params-search-box">
+            <Search size={16} style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Filter models by name or folder..."
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+            />
+            {filter && (
+              <button
+                className="btn btn-ghost btn-icon"
+                onClick={() => setFilter('')}
+                title="Clear filter"
+                style={{ padding: 4 }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
         {loading && models.length === 0 && (
           <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)', fontSize: 13 }}>
             <Loader2 size={16} className="spin" style={{ display: 'block', margin: '0 auto 8px' }} /> Loading...
@@ -290,7 +340,12 @@ export default function ModelsView() {
             </button>
           </div>
         )}
-        {models.map(m => (
+        {models.length > 0 && filteredModels.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: 13 }}>
+            No models match "{filter}"
+          </div>
+        )}
+        {filteredModels.map(m => (
           <ModelFileRow key={m.path} model={m} onDeleted={refresh} />
         ))}
       </div>

@@ -1,7 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { Plus, Trash, ChevronDown, ChevronRight, Save, RotateCcw, Pencil, Check, X, Loader2 } from 'lucide-react'
+import { Plus, Trash, ChevronDown, ChevronRight, Save, RotateCcw, Pencil, Check, X, Loader2, Box, Cpu, Zap, Database, Sliders, Wind, Server, FileText, GitBranch, Star, Settings } from 'lucide-react'
 import type { CommandsSchema, CommandCategory, CommandParam } from '../../../shared/types'
+
+const iconMap: Record<string, React.ElementType> = {
+  Box, Cpu, Zap, Database, Sliders, Wind, Server, FileText, GitBranch, Star, Settings
+}
+
 const PARAM_TYPES = ['boolean', 'number', 'string', 'select', 'text']
 const ICONS = ['Box', 'Cpu', 'Zap', 'Database', 'Sliders', 'Wind', 'Server', 'FileText', 'GitBranch', 'Star', 'Settings']
 const emptyCmd = (): CommandParam => ({
@@ -86,8 +91,18 @@ interface CategorySectionProps {
 function CategorySection({ cat, catIndex, onChange, onDelete }: CategorySectionProps) {
   const [open, setOpen] = useState(false)
   const [editingName, setEditingName] = useState(false)
+  const [pickingIcon, setPickingIcon] = useState(false)
   const [nameVal, setNameVal] = useState(cat.name)
   const [expandedCmds, setExpandedCmds] = useState<Set<number>>(new Set())
+  const iconRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (iconRef.current && !iconRef.current.contains(e.target as Node)) setPickingIcon(false)
+    }
+    if (pickingIcon) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [pickingIcon])
   function updateCmd(i: number, cmd: CommandParam) {
     const cmds = [...cat.commands]; cmds[i] = cmd; onChange({ ...cat, commands: cmds })
   }
@@ -124,10 +139,30 @@ function CategorySection({ cat, catIndex, onChange, onDelete }: CategorySectionP
             </>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-          <select className="cmd-select" style={{ fontSize: 11, padding: '2px 22px 2px 6px' }} value={cat.icon} onChange={e => onChange({ ...cat, icon: e.target.value })}>
-            {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
-          </select>
+        <div style={{ display: 'flex', gap: 4, position: 'relative' }} ref={iconRef} onClick={e => e.stopPropagation()}>
+          <button 
+            className="btn btn-ghost btn-icon" 
+            style={{ padding: 4 }} 
+            onClick={() => setPickingIcon(!pickingIcon)}
+            title={`Category Icon: ${cat.icon}`}
+          >
+            {React.createElement(iconMap[cat.icon] || Sliders, { size: 14 })}
+          </button>
+          {pickingIcon && (
+            <div className="dropdown-menu" style={{ right: 'auto', left: 0, minWidth: 'auto', padding: 8, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, zIndex: 100 }}>
+              {ICONS.map(i => (
+                <button 
+                  key={i}
+                  className={`btn btn-ghost btn-icon`} 
+                  style={{ padding: 6, background: cat.icon === i ? 'var(--border)' : 'transparent' }}
+                  title={i}
+                  onClick={() => { onChange({ ...cat, icon: i }); setPickingIcon(false) }}
+                >
+                  {React.createElement(iconMap[i] || Sliders, { size: 14 })}
+                </button>
+              ))}
+            </div>
+          )}
           <button className="btn btn-ghost btn-icon" style={{ padding: 4 }} onClick={() => setEditingName(true)} title="Rename"><Pencil size={12} /></button>
           <button className="btn btn-ghost btn-icon text-danger" style={{ padding: 4 }} onClick={onDelete} title="Delete category"><Trash size={12} /></button>
         </div>
