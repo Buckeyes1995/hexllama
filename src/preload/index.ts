@@ -69,6 +69,9 @@ const api = {
   getLatestBenchResults: () => ipcRenderer.invoke('get-latest-bench-results'),
   benchExportMarkdown: (content: string) => ipcRenderer.invoke('bench-export-markdown', content),
   benchExportPdf: () => ipcRenderer.invoke('bench-export-pdf'),
+  getRouterStatus: () => ipcRenderer.invoke('router-status'),
+  routerRefreshCatalog: () => ipcRenderer.invoke('router-refresh-catalog'),
+  routerSetEnabled: (enabled: boolean) => ipcRenderer.invoke('router-set-enabled', enabled),
 }
 if (process.contextIsolated) {
   try {
