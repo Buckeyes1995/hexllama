@@ -1,4 +1,5 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { getRouterStatus, refreshCatalog, startRouter, stopRouter } from './router'
 import {
   existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync,
   unlinkSync, createWriteStream, statSync, rmdirSync, renameSync, promises as fsPromises
@@ -21,12 +22,17 @@ for (const dir of [MODELS_DIR, TEMPLATES_DIR, BACKEND_DIR]) {
 function isSafePath(base: string, target: string): boolean {
   return resolve(target).startsWith(resolve(base))
 }
-interface AppSettings { externalModelFolders: string[] }
+// Open-ended settings shape — known keys are typed for ergonomics, but unknown
+// keys (e.g. piIntegration written by the router) are preserved across writes.
+interface AppSettings { externalModelFolders: string[]; [k: string]: unknown }
 async function loadSettings(): Promise<AppSettings> {
   try {
     if (!existsSync(SETTINGS_PATH)) return { externalModelFolders: [] }
     const data = JSON.parse(await fsPromises.readFile(SETTINGS_PATH, 'utf-8'))
-    return { externalModelFolders: Array.isArray(data.externalModelFolders) ? data.externalModelFolders : [] }
+    return {
+      ...data,
+      externalModelFolders: Array.isArray(data.externalModelFolders) ? data.externalModelFolders : []
+    }
   } catch { return { externalModelFolders: [] } }
 }
 async function saveSettings(s: AppSettings): Promise<void> {
@@ -273,6 +279,8 @@ export function registerIpcHandlers(): void {
       () => {
         try { renameSync(tmpPath, finalPath) } catch {}
         task.phase = 'done'; task.speed = 0; broadcastProgress(task, true)
+        // New model on disk → re-scan so pi sees it immediately.
+        refreshCatalog().catch(() => {})
         setTimeout(() => { downloadTasks.delete(id); broadcastTimes.delete(id) }, 5000)
       },
       (err) => { task.phase = 'error'; task.speed = 0; broadcastProgress(task, true); console.error('Download error:', err) }
@@ -332,6 +340,7 @@ export function registerIpcHandlers(): void {
       () => {
         try { renameSync(tmpPath, task.destPath) } catch {}
         task.phase = 'done'; task.speed = 0; broadcastProgress(task, true)
+        refreshCatalog().catch(() => {})
         setTimeout(() => { downloadTasks.delete(id); broadcastTimes.delete(id) }, 5000)
       },
       (err) => { task.phase = 'error'; task.speed = 0; broadcastProgress(task, true); console.error('Resume error:', err) }
@@ -832,6 +841,7 @@ export function registerIpcHandlers(): void {
       () => {
         try { renameSync(tmpPath, finalPath) } catch {}
         task.phase = 'done'; task.speed = 0; broadcast(true)
+        refreshCatalog().catch(() => {})
         setTimeout(() => { downloadTasks.delete(id); broadcastTimes.delete(id) }, 10000)
       },
       (err) => { task.phase = 'error'; task.speed = 0; broadcast(true); console.error('HF download error:', err) }
@@ -843,4 +853,22 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('onDownloadProgress', () => {})
   ipcMain.handle('removeDownloadListener', () => {})
   ipcMain.handle('get-version', () => app.getVersion())
+
+  ipcMain.handle('router-status', () => getRouterStatus())
+  ipcMain.handle('router-refresh-catalog', async () => {
+    const entries = await refreshCatalog()
+    return { success: true, count: entries.length }
+  })
+  ipcMain.handle('router-set-enabled', async (_e, enabled: boolean) => {
+    const s = await loadSettings()
+    const pi = (s.piIntegration as { enabled?: boolean; port?: number } | undefined) || {}
+    s.piIntegration = { ...pi, enabled }
+    await saveSettings(s)
+    if (enabled) {
+      try { await startRouter() } catch (err) { return { success: false, error: String(err) } }
+    } else {
+      await stopRouter()
+    }
+    return { success: true, status: getRouterStatus() }
+  })
 }

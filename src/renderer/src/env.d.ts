@@ -72,6 +72,9 @@ interface LlamaCppApi {
   notifyTabMoved: (url: string) => Promise<void>
   onTabMovedElsewhere: (cb: (data: { url: string }) => void) => void
   getVersion: () => Promise<string>
+  getRouterStatus: () => Promise<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null }>
+  routerRefreshCatalog: () => Promise<{ success: boolean; count: number }>
+  routerSetEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string; status?: { listening: boolean; port: number; catalogSize: number; currentModelId: string | null } }>
 }
 declare global {
   interface Window { api: LlamaCppApi }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { HardDrive, Download, Trash, RefreshCw, Loader2, ChevronDown, Terminal, Bell, BellOff, FolderPlus, Folder } from 'lucide-react'
+import { HardDrive, Download, Trash, RefreshCw, Loader2, ChevronDown, Terminal, Bell, BellOff, FolderPlus, Folder, Network } from 'lucide-react'
 import CommandsEditor from './CommandsEditor'
 
 const NOTIF_KEY = 'hexllama_update_notify'
@@ -18,6 +18,8 @@ export default function SettingsView() {
   const [expandedEditor, setExpandedEditor] = useState<string | null>(null)
   const [notifPref, setNotifPref] = useState<'banner' | 'manual'>(getNotifPref())
   const [extFolders, setExtFolders] = useState<string[]>([])
+  const [routerStatus, setRouterStatus] = useState<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null } | null>(null)
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false)
 
   useEffect(() => {
     if (releaseInfo?.assets.length && !selectedAssetUrl) {
@@ -28,6 +30,33 @@ export default function SettingsView() {
   useEffect(() => {
     window.api.listExternalModelFolders().then(setExtFolders)
   }, [])
+
+  useEffect(() => {
+    // Poll router status so the "Loaded model" line updates when pi triggers a swap.
+    let cancelled = false
+    const tick = async () => {
+      try { const s = await window.api.getRouterStatus(); if (!cancelled) setRouterStatus(s) } catch {}
+    }
+    tick()
+    const t = setInterval(tick, 3000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
+
+  async function handleRefreshCatalog() {
+    setRefreshingCatalog(true)
+    try {
+      const r = await window.api.routerRefreshCatalog()
+      const s = await window.api.getRouterStatus()
+      setRouterStatus(s)
+      if (r.success) console.log(`[settings] catalog refreshed: ${r.count} models`)
+    } finally { setRefreshingCatalog(false) }
+  }
+
+  async function handleToggleRouter(enabled: boolean) {
+    const r = await window.api.routerSetEnabled(enabled)
+    if (r.success && r.status) setRouterStatus(r.status)
+    else if (!r.success) alert(`Failed: ${r.error}`)
+  }
 
   async function refreshModels() {
     const m = await window.api.listModels()
@@ -151,6 +180,56 @@ export default function SettingsView() {
               onClick={() => setCompactSidebarEnabled(true)}
             >
               Auto-Collapse Sidebar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {}
+      <div className="settings-section">
+        <div className="settings-section-title"><Network /> Pi Integration (OpenAI Router)</div>
+        <div className="settings-row" style={{ borderBottom: 'none', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Hexllama exposes an OpenAI-compatible HTTP endpoint that any client (pi.dev, curl, your scripts) can talk to.
+            On each request, hexllama swaps the running model to match. Pi config at <code className="mono">~/.pi/agent/models.json</code> is rewritten on startup and on every catalog refresh.
+          </p>
+          <div style={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr',
+            columnGap: 16,
+            rowGap: 6,
+            fontSize: 13
+          }}>
+            <div style={{ color: 'var(--text-muted)' }}>Status</div>
+            <div style={{ color: routerStatus?.listening ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>
+              {routerStatus?.listening ? '● listening' : '○ not running'}
+            </div>
+            <div style={{ color: 'var(--text-muted)' }}>Endpoint</div>
+            <div className="mono" style={{ color: 'var(--text)' }}>
+              {routerStatus ? `http://localhost:${routerStatus.port}/v1` : '—'}
+            </div>
+            <div style={{ color: 'var(--text-muted)' }}>Catalog</div>
+            <div style={{ color: 'var(--text)' }}>
+              {routerStatus ? `${routerStatus.catalogSize} model${routerStatus.catalogSize === 1 ? '' : 's'}` : '—'}
+            </div>
+            <div style={{ color: 'var(--text-muted)' }}>Loaded model</div>
+            <div className="mono" style={{ color: routerStatus?.currentModelId ? 'var(--text)' : 'var(--text-muted)' }}>
+              {routerStatus?.currentModelId || '— (nothing loaded; pi will trigger a swap on first call)'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={!!routerStatus?.listening}
+                onChange={e => handleToggleRouter(e.target.checked)}
+              />
+              Enable router
+            </label>
+            <button className="btn btn-secondary btn-sm" onClick={handleRefreshCatalog} disabled={refreshingCatalog || !routerStatus?.listening}>
+              {refreshingCatalog ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+              Rescan models & rewrite pi config
             </button>
           </div>
         </div>

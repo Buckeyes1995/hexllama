@@ -70,6 +70,9 @@ const api = {
     ipcRenderer.on('tab-moved-elsewhere', (_e, data) => cb(data))
   },
   getVersion: () => ipcRenderer.invoke('get-version'),
+  getRouterStatus: () => ipcRenderer.invoke('router-status'),
+  routerRefreshCatalog: () => ipcRenderer.invoke('router-refresh-catalog'),
+  routerSetEnabled: (enabled: boolean) => ipcRenderer.invoke('router-set-enabled', enabled),
 }
 if (process.contextIsolated) {
   try {
