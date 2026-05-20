@@ -54,6 +54,9 @@ const api = {
   removeExternalModelFolder: (folder: string) => ipcRenderer.invoke('remove-external-model-folder', folder),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   openChatWindow: (port: number) => ipcRenderer.invoke('open-chat-window', port),
+  getRouterStatus: () => ipcRenderer.invoke('router-status'),
+  routerRefreshCatalog: () => ipcRenderer.invoke('router-refresh-catalog'),
+  routerSetEnabled: (enabled: boolean) => ipcRenderer.invoke('router-set-enabled', enabled),
 }
 if (process.contextIsolated) {
   try {

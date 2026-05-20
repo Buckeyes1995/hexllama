@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
+import { startRouter, stopRouter } from './router'
 import { existsSync } from 'fs'
 function resolveIcon(): string | undefined {
   const candidates = [
@@ -57,6 +58,7 @@ app.whenReady().then(() => {
   })
   registerIpcHandlers()
   createWindow()
+  startRouter().catch(err => console.error('[router] failed to start:', err))
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -65,4 +67,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+app.on('before-quit', () => {
+  stopRouter().catch(() => {})
 })

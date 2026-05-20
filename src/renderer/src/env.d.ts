@@ -65,6 +65,9 @@ interface LlamaCppApi {
   removeExternalModelFolder: (folder: string) => Promise<{ success: boolean; folders: string[] }>
   openExternal: (url: string) => Promise<void>
   openChatWindow: (port: number) => Promise<void>
+  getRouterStatus: () => Promise<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null }>
+  routerRefreshCatalog: () => Promise<{ success: boolean; count: number }>
+  routerSetEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string; status?: { listening: boolean; port: number; catalogSize: number; currentModelId: string | null } }>
 }
 declare global {
   interface Window { api: LlamaCppApi }
