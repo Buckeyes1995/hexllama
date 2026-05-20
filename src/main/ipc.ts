@@ -10,6 +10,7 @@ import https from 'https'
 import http from 'http'
 import { app } from 'electron'
 import extract from 'extract-zip'
+import net from 'net'
 const APP_ROOT = app.isPackaged ? join(app.getPath('userData')) : join(process.cwd())
 const MODELS_DIR    = join(APP_ROOT, 'models')
 const TEMPLATES_DIR = join(APP_ROOT, 'templates')
@@ -38,6 +39,25 @@ async function saveSettings(s: AppSettings): Promise<void> {
   await fsPromises.writeFile(SETTINGS_PATH, JSON.stringify(s, null, 2))
 }
 const runningProcesses = new Map<string, ChildProcess>()
+let sharedChatWindow: BrowserWindow | null = null
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false)
+      } else {
+        resolve(true)
+      }
+    })
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(true)
+      })
+    })
+    server.listen(port, '127.0.0.1')
+  })
+}
 interface DownloadTask {
   id: string
   url: string
@@ -464,13 +484,55 @@ export function registerIpcHandlers(): void {
     if (r.canceled || !r.filePaths.length) return null
     return { name: basename(r.filePaths[0]), path: r.filePaths[0] }
   })
-  ipcMain.handle('run-model', (_e, opts: { id: string; backendPath: string; exe: string; args: string[]; openBrowser: boolean; port: number }) => {
+  ipcMain.handle('run-model', async (_e, opts: { id: string; name: string; backendPath: string; exe: string; args: string[]; openBrowser: boolean; port: number }) => {
     if (runningProcesses.has(opts.id)) return { success: false, error: 'Already running' }
+    const port = opts.port || 8080
+    let available = await isPortAvailable(port)
+    let finalPort = port
+    let finalArgs = [...opts.args]
+
+    if (!available) {
+      const response = await dialog.showMessageBox({
+        type: 'question',
+        buttons: ['Yes', 'No'],
+        defaultId: 0,
+        title: 'Port Conflict',
+        message: `Port ${port} is already in use by another running model or process.`,
+        detail: `Would you like to temporarily allocate a different available port for "${opts.name}"?`,
+        cancelId: 1
+      })
+      if (response.response === 0) {
+        let tempPort = port + 1
+        while (tempPort < 65535) {
+          if (await isPortAvailable(tempPort)) {
+            break
+          }
+          tempPort++
+        }
+        finalPort = tempPort
+        // Update the --port parameter in finalArgs
+        const portIdx = finalArgs.indexOf('--port')
+        if (portIdx !== -1 && portIdx + 1 < finalArgs.length) {
+          finalArgs[portIdx + 1] = String(finalPort)
+        } else {
+          const shortPortIdx = finalArgs.indexOf('-p')
+          if (shortPortIdx !== -1 && shortPortIdx + 1 < finalArgs.length) {
+            finalArgs[shortPortIdx + 1] = String(finalPort)
+          } else {
+            finalArgs.push('--port', String(finalPort))
+          }
+        }
+        available = true
+      } else {
+        return { success: false, error: `Port ${port} is already in use.` }
+      }
+    }
+
     const exePath = join(opts.backendPath, opts.exe)
     if (!isSafePath(BACKEND_DIR, exePath)) return { success: false, error: 'Access denied' }
     if (!existsSync(exePath)) return { success: false, error: `Executable not found: ${exePath}` }
     try {
-      const proc = spawn(exePath, opts.args, { detached: false, stdio: 'pipe', cwd: dirname(exePath), windowsHide: false })
+      const proc = spawn(exePath, finalArgs, { detached: false, stdio: 'pipe', cwd: dirname(exePath), windowsHide: false })
       proc.stderr?.on('data', (d) => console.error('[llama-server]', d.toString()))
       proc.stdout?.on('data', (d) => console.log('[llama-server]', d.toString()))
       proc.on('error', (err: any) => {
@@ -491,10 +553,12 @@ export function registerIpcHandlers(): void {
       })
       if (opts.openBrowser) {
         setTimeout(() => {
-          openChatWindow(opts.port)
+          if (runningProcesses.has(opts.id)) {
+            openChatWindow(finalPort, opts.name)
+          }
         }, 2500)
       }
-      return { success: true, pid: proc.pid }
+      return { success: true, pid: proc.pid, port: finalPort }
     } catch (err: any) {
       if (err.code === 'UNKNOWN' && opts.backendPath.toLowerCase().includes('arm64') && process.arch !== 'arm64') {
         return { success: false, error: 'Architecture mismatch: You are trying to run an ARM64 backend on an x64 system. Please delete this backend in Settings and download the x64 version.' }
@@ -574,8 +638,18 @@ export function registerIpcHandlers(): void {
       return { success: false, error: String(err) }
     }
   })
-  function openChatWindow(port: number) {
+  function openChatWindow(port: number, name?: string) {
     const chatUrl = `http://127.0.0.1:${port}`
+    const templateName = name || `Port ${port}`
+    if (sharedChatWindow && !sharedChatWindow.isDestroyed()) {
+      if (sharedChatWindow.isMinimized()) {
+        sharedChatWindow.restore()
+      }
+      sharedChatWindow.show()
+      sharedChatWindow.focus()
+      sharedChatWindow.webContents.send('add-chat-tab', { url: chatUrl, name: templateName })
+      return
+    }
     const candidates = [
       join(process.cwd(), 'assets', 'icon.png'),                  
       join(__dirname, '../../assets/icon.png'),                    
@@ -583,12 +657,88 @@ export function registerIpcHandlers(): void {
     ]
     const icon = candidates.find(existsSync)
     
-    const chatWin = new BrowserWindow({
-      width: 1024, height: 768, show: true, autoHideMenuBar: true,
+    let x: number | undefined
+    let y: number | undefined
+    const width = 1024
+    const height = 768
+    const mainWin = BrowserWindow.getAllWindows().find(w => {
+      try {
+        const url = w.webContents.getURL()
+        return !url.includes('chat_url')
+      } catch {
+        return false
+      }
+    })
+    if (mainWin && !mainWin.isDestroyed()) {
+      const bounds = mainWin.getBounds()
+      x = Math.round(bounds.x + (bounds.width - width) / 2)
+      y = Math.round(bounds.y + (bounds.height - height) / 2)
+    }
+    
+    sharedChatWindow = new BrowserWindow({
+      width, height, show: true, autoHideMenuBar: true,
       title: 'Hexllama - Llama-UI',
       titleBarStyle: 'hiddenInset',
       backgroundColor: '#ffffff',
       ...(icon ? { icon } : {}),
+      ...(x !== undefined && y !== undefined ? { x, y } : {}),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    })
+    sharedChatWindow.on('closed', () => {
+      sharedChatWindow = null
+    })
+    const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+    if (rendererUrl) {
+      sharedChatWindow.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}&name=${encodeURIComponent(templateName)}`)
+    } else {
+      sharedChatWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl, name: templateName } })
+    }
+  }
+
+  ipcMain.handle('open-chat-window', (_e, port: number, name: string) => {
+    openChatWindow(port, name)
+  })
+
+  ipcMain.handle('open-detached-chat-window', (_e, port: number, name: string) => {
+    const chatUrl = `http://127.0.0.1:${port}`
+    const templateName = name || `Port ${port}`
+    const candidates = [
+      join(process.cwd(), 'assets', 'icon.png'),                  
+      join(__dirname, '../../assets/icon.png'),                    
+      join(app.getAppPath(), 'assets', 'icon.png')                 
+    ]
+    const icon = candidates.find(existsSync)
+    
+    let x: number | undefined
+    let y: number | undefined
+    const width = 1024
+    const height = 768
+    const mainWin = BrowserWindow.getAllWindows().find(w => {
+      try {
+        const url = w.webContents.getURL()
+        return !url.includes('chat_url')
+      } catch {
+        return false
+      }
+    })
+    if (mainWin && !mainWin.isDestroyed()) {
+      const bounds = mainWin.getBounds()
+      x = Math.round(bounds.x + (bounds.width - width) / 2)
+      y = Math.round(bounds.y + (bounds.height - height) / 2)
+    }
+    
+    const detachedWin = new BrowserWindow({
+      width, height, show: true, autoHideMenuBar: true,
+      title: 'Hexllama - Llama-UI',
+      titleBarStyle: 'hiddenInset',
+      backgroundColor: '#ffffff',
+      ...(icon ? { icon } : {}),
+      ...(x !== undefined && y !== undefined ? { x, y } : {}),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: false,
@@ -598,14 +748,18 @@ export function registerIpcHandlers(): void {
     })
     const rendererUrl = process.env['ELECTRON_RENDERER_URL']
     if (rendererUrl) {
-      chatWin.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}`)
+      detachedWin.loadURL(`${rendererUrl}?chat_url=${encodeURIComponent(chatUrl)}&name=${encodeURIComponent(templateName)}&detached=true`)
     } else {
-      chatWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl } })
+      detachedWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { chat_url: chatUrl, name: templateName, detached: 'true' } })
     }
-  }
+  })
 
-  ipcMain.handle('open-chat-window', (_e, port: number) => {
-    openChatWindow(port)
+  ipcMain.handle('notify-tab-moved', (_e, url: string) => {
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('tab-moved-elsewhere', { url })
+      }
+    })
   })
   ipcMain.handle('bench-run', async (_e, opts: { backendPath: string; backendExe?: string; modelPath: string; reps?: number; params: Record<string, string> }) => {
     const binName = process.platform === 'win32' ? 'llama-bench.exe' : 'llama-bench'
@@ -821,6 +975,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('hf-open-models-dir', () => shell.openPath(MODELS_DIR))
   ipcMain.handle('onDownloadProgress', () => {})
   ipcMain.handle('removeDownloadListener', () => {})
+  ipcMain.handle('get-version', () => app.getVersion())
 
   ipcMain.handle('router-status', () => getRouterStatus())
   ipcMain.handle('router-refresh-catalog', async () => {

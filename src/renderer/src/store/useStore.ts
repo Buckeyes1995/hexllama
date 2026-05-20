@@ -5,6 +5,7 @@ interface CardState {
   status: RunningStatus
   pid?: number
   expanded: boolean
+  tempPort?: number
 }
 export interface ModelFileInfo {
   name: string; path: string; size: number; folder: string; external?: boolean
@@ -36,6 +37,8 @@ interface AppStore {
   hubQuery: string
   hubResults: any[]
   hubSelectedModelId: string | null
+  compactSidebarEnabled: boolean
+  setCompactSidebarEnabled: (enabled: boolean) => void
   setView: (v: AppStore['view']) => void
   setShowCreateModal: (show: boolean, template?: Template | null) => void
   setPrefillModelPath: (path: string | null) => void
@@ -60,7 +63,7 @@ interface AppStore {
   addCard: (template: Template) => void
   updateCard: (id: string, template: Partial<Template>) => void
   removeCard: (id: string) => void
-  setCardStatus: (id: string, status: RunningStatus, pid?: number) => void
+  setCardStatus: (id: string, status: RunningStatus, pid?: number, tempPort?: number) => void
   toggleCardExpanded: (id: string) => void
   collapseAllCards: () => void
 }
@@ -71,6 +74,11 @@ export const useStore = create<AppStore>((set) => ({
   updateDismissed: false, checkingUpdate: false, downloadProgress: null,
   templateSearch: '', modelDownloads: {}, hfDownloads: [],
   hubQuery: '', hubResults: [], hubSelectedModelId: null,
+  compactSidebarEnabled: localStorage.getItem('compactSidebar') === 'true',
+  setCompactSidebarEnabled: (enabled) => {
+    localStorage.setItem('compactSidebar', String(enabled))
+    set({ compactSidebarEnabled: enabled })
+  },
   setView: (v) => set({ view: v }),
   setShowCreateModal: (show, template = null) => set({ showCreateModal: show, editingTemplate: template }),
   setPrefillModelPath: (path) => set({ prefillModelPath: path }),
@@ -102,8 +110,13 @@ export const useStore = create<AppStore>((set) => ({
     cards: s.cards.map(c => c.template.id === id ? { ...c, template: { ...c.template, ...partial, updatedAt: new Date().toISOString() } } : c)
   })),
   removeCard: (id) => set((s) => ({ cards: s.cards.filter(c => c.template.id !== id) })),
-  setCardStatus: (id, status, pid) => set((s) => ({
-    cards: s.cards.map(c => c.template.id === id ? { ...c, status, pid: pid ?? c.pid } : c)
+  setCardStatus: (id, status, pid, tempPort) => set((s) => ({
+    cards: s.cards.map(c => c.template.id === id ? {
+      ...c,
+      status,
+      pid: status === 'idle' || status === 'error' ? undefined : (pid ?? c.pid),
+      tempPort: status === 'idle' || status === 'error' ? undefined : (tempPort ?? c.tempPort)
+    } : c)
   })),
   toggleCardExpanded: (id) => set((s) => ({
     cards: s.cards.map(c => c.template.id === id ? { ...c, expanded: !c.expanded } : c)
