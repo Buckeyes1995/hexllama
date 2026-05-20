@@ -217,7 +217,7 @@ export default function App() {
 
       <div
         style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0, height: 80, zIndex: 998,
+          position: 'fixed', bottom: 0, left: '220px', right: 0, height: 80, zIndex: 998,
           background: 'linear-gradient(to top, var(--surface) 20%, transparent)',
           pointerEvents: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
           padding: '0 24px 24px 0'
