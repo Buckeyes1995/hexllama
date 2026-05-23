@@ -1,10 +1,18 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import ModelCard from './ModelCard'
 import { Plus, Upload, Search } from 'lucide-react'
 import type { Template } from '../../../shared/types'
+const TEMPLATE_SEARCH_KEY = 'hexllama_template_search'
 export default function CardsView() {
   const { cards, setShowCreateModal, addCard, templateSearch, setTemplateSearch } = useStore()
+  useEffect(() => {
+    const saved = localStorage.getItem(TEMPLATE_SEARCH_KEY)
+    if (saved) setTemplateSearch(saved)
+  }, [setTemplateSearch])
+  useEffect(() => {
+    localStorage.setItem(TEMPLATE_SEARCH_KEY, templateSearch)
+  }, [templateSearch])
   async function handleImport() {
     const template = await window.api.importTemplate()
     if (template) {
