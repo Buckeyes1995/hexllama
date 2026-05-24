@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList
 } from 'recharts'
 import { LineChart as LineIcon, BarChart3, Grid3x3 } from 'lucide-react'
 import { COLUMN_DEFS, enrichRows, type ColumnDef } from './BenchmarkResultsTable'
@@ -163,6 +163,25 @@ function ChartView({ rows, xCol, seriesCol }: { rows: Record<string, unknown>[];
     })
   }, [rows, xCol, seriesCol])
 
+  // Tight-fit the y-axis to the actual data range. recharts defaults to [0, dataMax]
+  // which flattens small differences (e.g. 47 vs 49 tok/s looks identical when the
+  // axis spans 0-50). 10% headroom keeps top/bottom values from kissing the edges.
+  const yDomain = useMemo<[number, number] | undefined>(() => {
+    const vals: number[] = []
+    for (const row of data) {
+      for (const s of seriesValues) {
+        const v = row[s]
+        if (typeof v === 'number' && Number.isFinite(v)) vals.push(v)
+      }
+    }
+    if (!vals.length) return undefined
+    const min = Math.min(...vals)
+    const max = Math.max(...vals)
+    if (min === max) return [Math.max(0, min - 1), max + 1]
+    const pad = (max - min) * 0.1
+    return [Math.max(0, min - pad), max + pad]
+  }, [data, seriesValues])
+
   const commonAxes = (
     <>
       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -173,6 +192,8 @@ function ChartView({ rows, xCol, seriesCol }: { rows: Record<string, unknown>[];
       />
       <YAxis
         stroke="var(--text-secondary)"
+        domain={yDomain || ['auto', 'auto']}
+        tickFormatter={(v) => Number(v).toFixed(1)}
         label={{ value: 'tok/s', angle: -90, position: 'insideLeft', style: { fill: 'var(--text-secondary)', fontSize: 12 } }}
       />
       <Tooltip
@@ -184,40 +205,60 @@ function ChartView({ rows, xCol, seriesCol }: { rows: Record<string, unknown>[];
     </>
   )
 
+  // Compact value labels above each data point / bar top. With the y-axis zoomed in,
+  // showing the raw numbers keeps the chart honest about what the differences mean.
+  const valueLabel = {
+    position: (xCol.numeric ? 'top' : 'top') as 'top',
+    fontSize: 10,
+    fill: 'var(--text-secondary)',
+    formatter: (v: unknown) => Number(v).toFixed(1)
+  }
+
   return (
-    <div style={{ width: '100%', height: 340 }}>
-      <ResponsiveContainer>
-        {xCol.numeric ? (
-          <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
-            {commonAxes}
-            {seriesValues.map((s, i) => (
-              <Line
-                key={s}
-                dataKey={s}
-                name={s}
-                stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6 }}
-                connectNulls
-              />
-            ))}
-          </LineChart>
-        ) : (
-          <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
-            {commonAxes}
-            {seriesValues.map((s, i) => (
-              <Bar
-                key={s}
-                dataKey={s}
-                name={s}
-                fill={SERIES_COLORS[i % SERIES_COLORS.length]}
-                radius={[3, 3, 0, 0]}
-              />
-            ))}
-          </BarChart>
-        )}
-      </ResponsiveContainer>
+    <div style={{ width: '100%' }}>
+      <div style={{ width: '100%', height: 340 }}>
+        <ResponsiveContainer>
+          {xCol.numeric ? (
+            <LineChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: 16 }}>
+              {commonAxes}
+              {seriesValues.map((s, i) => (
+                <Line
+                  key={s}
+                  dataKey={s}
+                  name={s}
+                  stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                >
+                  {seriesValues.length <= 4 && <LabelList {...valueLabel} />}
+                </Line>
+              ))}
+            </LineChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: 16 }}>
+              {commonAxes}
+              {seriesValues.map((s, i) => (
+                <Bar
+                  key={s}
+                  dataKey={s}
+                  name={s}
+                  fill={SERIES_COLORS[i % SERIES_COLORS.length]}
+                  radius={[3, 3, 0, 0]}
+                >
+                  {seriesValues.length <= 4 && <LabelList {...valueLabel} />}
+                </Bar>
+              ))}
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+      {yDomain && yDomain[0] > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>
+          Y-axis zoomed to {yDomain[0].toFixed(1)}–{yDomain[1].toFixed(1)} tok/s to make small differences visible.
+        </div>
+      )}
     </div>
   )
 }
