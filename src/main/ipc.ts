@@ -565,6 +565,7 @@ export function registerIpcHandlers(): void {
   
   // Shared in-memory store; the popup results window pulls from it on load.
   let latestBenchResults: unknown[] = []
+  let latestBenchContext: { backendPath: string; backendExe?: string; modelPath: string } | null = null
   function openBenchResultsWindow() {
     const candidates = [
       join(process.cwd(), 'assets', 'icon.png'),
@@ -592,12 +593,13 @@ export function registerIpcHandlers(): void {
       win.loadFile(join(__dirname, '../renderer/index.html'), { query: { bench_results: '1' } })
     }
   }
-  ipcMain.handle('bench-show-results', (_e, rows: unknown[]) => {
+  ipcMain.handle('bench-show-results', (_e, rows: unknown[], context?: { backendPath: string; backendExe?: string; modelPath: string }) => {
     latestBenchResults = Array.isArray(rows) ? rows : []
+    latestBenchContext = context && context.backendPath && context.modelPath ? context : null
     openBenchResultsWindow()
     return { success: true }
   })
-  ipcMain.handle('get-latest-bench-results', () => latestBenchResults)
+  ipcMain.handle('get-latest-bench-results', () => ({ rows: latestBenchResults, context: latestBenchContext }))
   ipcMain.handle('bench-export-markdown', async (event, content: string) => {
     const win = BrowserWindow.fromWebContents(event.sender) || undefined
     const r = await dialog.showSaveDialog(win as BrowserWindow, {

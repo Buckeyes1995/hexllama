@@ -8,14 +8,16 @@ const IS_MACOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navi
 
 export default function BenchmarkResultsWindow() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [context, setContext] = useState<{ backendPath: string; backendExe?: string; modelPath: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState<'md' | 'pdf' | null>(null)
   const [savedTo, setSavedTo] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    window.api.getLatestBenchResults().then(r => {
-      setRows(r || [])
+    window.api.getLatestBenchResults().then(payload => {
+      setRows(payload?.rows || [])
+      setContext(payload?.context || null)
       setLoading(false)
     }).catch(e => {
       setError(String(e))
@@ -116,7 +118,7 @@ export default function BenchmarkResultsWindow() {
         ) : (
           <>
             <div style={{ marginBottom: 24 }}>
-              <RecommendedSettings rows={rows} />
+              <RecommendedSettings rows={rows} context={context || undefined} />
             </div>
             <div
               style={{

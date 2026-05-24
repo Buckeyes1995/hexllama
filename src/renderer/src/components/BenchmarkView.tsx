@@ -84,6 +84,88 @@ function describeSub(sub: Record<string, string>): string {
     .filter(Boolean)
     .join(' · ')
 }
+// Curated starting points. Each preset answers a specific tuning question without
+// blowing the run-time budget — single-axis where possible. Clicking replaces the
+// current params (it does NOT merge), so the user always sees exactly what runs.
+interface SweepPreset {
+  id: string
+  label: string
+  question: string  // shown on hover; what the sweep is trying to answer
+  runs: number      // estimated run count (ignoring auto-split — that's transparent)
+  params: Record<string, string>
+}
+const SWEEP_PRESETS: SweepPreset[] = [
+  {
+    id: 'flash-attn',
+    label: 'Flash Attention',
+    question: 'Does Flash Attention help on your hardware?',
+    runs: 2,
+    params: { '-fa': '0,1' }
+  },
+  {
+    id: 'gpu-offload',
+    label: 'GPU Offload',
+    question: 'How many layers to offload to the GPU for the best speed/memory trade?',
+    runs: 4,
+    params: { '-ngl': '0,32,64,99' }
+  },
+  {
+    id: 'batch-tune',
+    label: 'Batch Tuning',
+    question: 'Which batch + micro-batch combo maximizes prompt-processing throughput?',
+    runs: 6,
+    params: { '-b': '1024,2048,4096', '-ub': '256,512' }
+  },
+  {
+    id: 'kv-quant',
+    label: 'KV Quantization',
+    question: 'How much memory can KV cache quantization save, at what speed cost?',
+    runs: 9,
+    params: { '-fa': '1', '-ctk': 'f16,q8_0,q4_0', '-ctv': 'f16,q8_0,q4_0' }
+  },
+  {
+    id: 'threads',
+    label: 'Thread Count',
+    question: 'How does CPU thread count affect throughput on this model?',
+    runs: 5,
+    params: { '-t': '4,6,8,10,12' }
+  }
+]
+function splitVals(s: string): string[] {
+  return s.split(',').map(t => t.trim()).filter(Boolean)
+}
+// A preset is "active" when every value it specifies appears in the current sweep.
+// This is a subset check (not equality), so multiple presets stack naturally:
+// selecting Flash Attn + KV Quantization both stay highlighted.
+function presetMatches(preset: SweepPreset, current: Record<string, string>): boolean {
+  for (const [flag, val] of Object.entries(preset.params)) {
+    const want = new Set(splitVals(val))
+    const have = new Set(splitVals(current[flag] || ''))
+    for (const v of want) if (!have.has(v)) return false
+  }
+  return true
+}
+function applyPreset(preset: SweepPreset, current: Record<string, string>): Record<string, string> {
+  const next: Record<string, string> = { ...current }
+  for (const [flag, val] of Object.entries(preset.params)) {
+    const have = splitVals(next[flag] || '')
+    const merged = [...have]
+    for (const v of splitVals(val)) if (!merged.includes(v)) merged.push(v)
+    next[flag] = merged.join(',')
+  }
+  return next
+}
+function removePreset(preset: SweepPreset, current: Record<string, string>): Record<string, string> {
+  const next: Record<string, string> = { ...current }
+  for (const [flag, val] of Object.entries(preset.params)) {
+    const remove = new Set(splitVals(val))
+    const kept = splitVals(next[flag] || '').filter(v => !remove.has(v))
+    if (kept.length === 0) delete next[flag]
+    else next[flag] = kept.join(',')
+  }
+  return next
+}
+
 const SWEEP_PARAMS: SweepParam[] = [
   { flag: '-t',    label: 'Threads',     placeholder: 'e.g. 4,6,8',    defaultValue: '8',    validValues: '1..256',                                                                                  choices: ['2', '4', '6', '8', '10', '12'] },
   { flag: '-ngl',  label: 'GPU Layers',  placeholder: 'e.g. 99,30,0',  defaultValue: '99',   validValues: '0..99 (all)',                                                                              choices: ['0', '16', '32', '64', '99'] },
@@ -95,6 +177,69 @@ const SWEEP_PARAMS: SweepParam[] = [
   { flag: '-ctk',  label: 'KV Cache K',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1',             choices: KV_TYPES },
   { flag: '-ctv',  label: 'KV Cache V',  placeholder: 'e.g. f16,q8_0', defaultValue: 'f16',  validValues: 'f16 | f32 | bf16 — and (with -fa 1) q8_0 | q4_0 | q4_1 | iq4_nl | q5_0 | q5_1',             choices: KV_TYPES },
 ]
+
+function PresetButton({ preset, active, disabled, onClick }: {
+  preset: SweepPreset
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <div
+      style={{ position: 'relative' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button
+        type="button"
+        className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
+        onClick={onClick}
+        disabled={disabled}
+        aria-pressed={active}
+      >
+        {preset.label}
+        <span style={{ marginLeft: 6, opacity: 0.7, fontSize: 11 }}>{preset.runs}×</span>
+      </button>
+      {hover && (
+        <div
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            zIndex: 60,
+            width: 280,
+            padding: '10px 12px',
+            background: 'var(--surface)',
+            border: '1.5px solid var(--border-strong)',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: 'var(--shadow-md)',
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: 'var(--text)',
+            pointerEvents: 'none'
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{preset.question}</div>
+          <div style={{ marginBottom: 6, color: 'var(--text-secondary)' }}>
+            Adds <span className="mono" style={{ fontFamily: "'SF Mono','Fira Code',monospace" }}>~{preset.runs} runs</span>
+            {' '}per test. Click again to remove. Combine with other presets — overlapping values merge.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {Object.entries(preset.params).map(([flag, val]) => (
+              <div key={flag} style={{ fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 11 }}>
+                <span style={{ color: 'var(--accent)' }}>{flag}</span>
+                <span style={{ color: 'var(--text-muted)' }}> = </span>
+                <span>{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function MultiChoiceMenu({ choices, value, onChange, disabled }: {
   choices: string[]
@@ -321,10 +466,40 @@ export default function BenchmarkView() {
       {/* Sweep params */}
       <div className="settings-section">
         <div className="settings-section-title"><Gauge size={14} /> Sweep Parameters</div>
+        <div style={{ padding: '0 16px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginRight: 4 }}>
+            Presets:
+          </span>
+          {SWEEP_PRESETS.map(preset => {
+            const active = presetMatches(preset, params)
+            return (
+              <PresetButton
+                key={preset.id}
+                preset={preset}
+                active={active}
+                disabled={running}
+                onClick={() =>
+                  setParams(active ? removePreset(preset, params) : applyPreset(preset, params))
+                }
+              />
+            )
+          })}
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setParams({})}
+            disabled={running || Object.values(params).every(v => !v.trim())}
+            title="Clear all sweep parameters"
+            style={{ marginLeft: 'auto' }}
+          >
+            Clear
+          </button>
+        </div>
         <p className="form-hint" style={{ padding: '0 16px 12px', fontSize: 12 }}>
-          Comma-separated values produce a sweep (e.g. <code>4,6,8</code>). Leave a field empty to
-          use llama-bench's single-value default (shown next to each label). Ranges like
-          <code>1024-4096+1024</code> are also supported.
+          Click presets to stack them (re-click to remove). Comma-separated values in a field
+          produce a sweep (e.g. <code>4,6,8</code>). Leave a field empty to use llama-bench's
+          single-value default (shown next to each label). Ranges like <code>1024-4096+1024</code>
+          are also supported.
         </p>
         <div className="cmd-grid">
           {SWEEP_PARAMS.map(p => {
@@ -621,39 +796,45 @@ export default function BenchmarkView() {
         )
       })()}
 
-      {rows.length > 0 && (
-        <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <RecommendedSettings rows={rows} />
-          <div
-            style={{
-              padding: '16px 18px',
-              background: 'var(--surface)',
-              border: '1.5px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              boxShadow: 'var(--shadow)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                {rows.length} result{rows.length === 1 ? '' : 's'} ready
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                Open the results window to view the table and export to Markdown or PDF.
-              </div>
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={() => window.api.benchShowResults(rows)}
+      {rows.length > 0 && (() => {
+        const backend = backends.find(b => b.name === backendName) || activeBackend
+        const ctx = backend && modelPath
+          ? { backendPath: backend.path, backendExe: backend.exe || undefined, modelPath }
+          : undefined
+        return (
+          <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <RecommendedSettings rows={rows} context={ctx} />
+            <div
+              style={{
+                padding: '16px 18px',
+                background: 'var(--surface)',
+                border: '1.5px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                boxShadow: 'var(--shadow)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16
+              }}
             >
-              <ExternalLink size={14} /> Open Results Window
-            </button>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                  {rows.length} result{rows.length === 1 ? '' : 's'} ready
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Open the results window to view the table and export to Markdown or PDF.
+                </div>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() => window.api.benchShowResults(rows, ctx)}
+              >
+                <ExternalLink size={14} /> Open Results Window
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

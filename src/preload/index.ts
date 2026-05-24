@@ -77,7 +77,8 @@ const api = {
     ipcRenderer.on('bench-progress', (_e, data) => cb(data))
   },
   removeBenchProgressListener: () => ipcRenderer.removeAllListeners('bench-progress'),
-  benchShowResults: (rows: unknown[]) => ipcRenderer.invoke('bench-show-results', rows),
+  benchShowResults: (rows: unknown[], context?: { backendPath: string; backendExe?: string; modelPath: string }) =>
+    ipcRenderer.invoke('bench-show-results', rows, context),
   getLatestBenchResults: () => ipcRenderer.invoke('get-latest-bench-results'),
   benchExportMarkdown: (content: string) => ipcRenderer.invoke('bench-export-markdown', content),
   benchExportPdf: () => ipcRenderer.invoke('bench-export-pdf'),
