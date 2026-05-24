@@ -46,7 +46,7 @@ export function shortModelName(filename: unknown): string {
   return base.replace(/\.(gguf|bin|ggml)$/i, '')
 }
 
-export function enrichRows(raw: Record<string, unknown>[]) {
+export function enrichRows(raw: Record<string, unknown>[]): Record<string, unknown>[] {
   return raw.map(r => ({
     ...r,
     test: deriveTest(r),

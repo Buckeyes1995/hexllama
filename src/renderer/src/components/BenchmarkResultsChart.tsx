@@ -178,7 +178,7 @@ function ChartView({ rows, xCol, seriesCol }: { rows: Record<string, unknown>[];
       <Tooltip
         contentStyle={{ background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, fontSize: 12 }}
         labelStyle={{ color: 'var(--text)' }}
-        formatter={(v: number) => v.toFixed(2)}
+        formatter={(v) => Number(v).toFixed(2)}
       />
       <Legend wrapperStyle={{ fontSize: 12 }} />
     </>
