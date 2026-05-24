@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { Play, Square, Settings, ChevronDown, MoreVertical, Copy, Trash, Download, Globe, Server, AlertCircle } from 'lucide-react'
+import { Play, Square, Settings, ChevronDown, MoreVertical, Copy, Trash, Download, Globe, Server, AlertCircle, Bot } from 'lucide-react'
 import type { CardState, CommandParam } from '../../../shared/types'
 import CmdParamsEditor from './CmdParamsEditor'
 interface Props { card: CardState }
 export default function ModelCard({ card }: Props) {
-  const { toggleCardExpanded, updateCard, setCardStatus, removeCard, backends, activeBackend, commandsSchema, setShowCreateModal, models } = useStore()
+  const { toggleCardExpanded, updateCard, setCardStatus, removeCard, backends, activeBackend, commandsSchema, setShowCreateModal, models, routerStatus } = useStore()
+  const isAuto = !!card.template.autoCreated
+  // True when the pi router currently has THIS card's model loaded in its slot.
+  const loadedByPi = !!(
+    routerStatus?.currentModelPath &&
+    card.template.modelPath &&
+    routerStatus.currentModelPath === card.template.modelPath
+  )
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const isRunning = card.status === 'running'
@@ -103,7 +110,34 @@ export default function ModelCard({ card }: Props) {
           )}
         </div>
         <div className="card-info">
-          <h3 className="card-name" title={card.template.name}>{card.template.name}</h3>
+          <h3 className="card-name" title={card.template.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.template.name}</span>
+            {isAuto && (
+              <span
+                title="Auto-created by the pi router. Edit and save to make it permanent."
+                style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.4px',
+                  padding: '2px 6px', borderRadius: 4,
+                  background: 'rgba(59,130,246,0.15)', color: 'var(--accent)',
+                  border: '1px solid rgba(59,130,246,0.35)',
+                  textTransform: 'uppercase', flexShrink: 0
+                }}
+              >PI-AUTO</span>
+            )}
+            {loadedByPi && (
+              <span
+                title="Currently loaded by the pi router on its slot port"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.4px',
+                  padding: '2px 6px', borderRadius: 4,
+                  background: 'rgba(22,163,74,0.15)', color: 'var(--success)',
+                  border: '1px solid rgba(22,163,74,0.35)',
+                  textTransform: 'uppercase', flexShrink: 0
+                }}
+              ><Bot size={10} /> LOADED BY PI</span>
+            )}
+          </h3>
           <p className="card-desc" title={card.template.description}>{card.template.description || 'No description'}</p>
         </div>
         <div className="card-menu-btn" ref={menuRef} style={{ position: 'relative', zIndex: 10 }}>

@@ -95,6 +95,29 @@ export default function App() {
       const card = s.cards.find(c => c.template.id === data.id)
       if (card && card.status === 'running') s.setCardStatus(data.id, 'idle')
     })
+    window.api.onTemplateListChanged(async () => {
+      // Pi router added/removed an auto-template — re-hydrate the dashboard.
+      const templates = (await window.api.listTemplates()) as Template[]
+      const s = useStore.getState()
+      const prevById = new Map(s.cards.map(c => [c.template.id, c]))
+      s.setCards(templates.map(t => {
+        const existing = prevById.get(t.id)
+        return existing
+          ? { ...existing, template: t }
+          : { template: t, status: 'idle' as const, expanded: false }
+      }))
+    })
+    // Pi router status poll (3s) — cards consult store.routerStatus.currentModelPath
+    // to decide whether to show "loaded by pi" indicator.
+    const pollRouter = async () => {
+      try {
+        const s = await window.api.getRouterStatus()
+        useStore.getState().setRouterStatus(s)
+      } catch { /* router may be disabled */ }
+    }
+    pollRouter()
+    const routerPollHandle = setInterval(pollRouter, 3000)
+    return () => clearInterval(routerPollHandle)
   }, [])
 
   useEffect(() => {

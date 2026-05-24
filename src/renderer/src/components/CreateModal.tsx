@@ -102,9 +102,10 @@ export default function CreateModal() {
       launchMode
     }
     if (editingTemplate) {
-      const res = await window.api.saveTemplate({ ...editingTemplate, ...templateData })
+      // Promoting an auto-template to a permanent one clears the flag.
+      const res = await window.api.saveTemplate({ ...editingTemplate, ...templateData, autoCreated: false })
       if (res.success) {
-        updateCard(editingTemplate.id, templateData)
+        updateCard(editingTemplate.id, { ...templateData, autoCreated: false })
         setShowCreateModal(false)
       }
     } else {

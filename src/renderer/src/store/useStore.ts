@@ -38,6 +38,8 @@ interface AppStore {
   hubResults: any[]
   hubSelectedModelId: string | null
   compactSidebarEnabled: boolean
+  routerStatus: { listening: boolean; port: number; catalogSize: number; currentModelId: string | null; currentModelPath: string | null } | null
+  setRouterStatus: (s: AppStore['routerStatus']) => void
   setCompactSidebarEnabled: (enabled: boolean) => void
   setView: (v: AppStore['view']) => void
   setShowCreateModal: (show: boolean, template?: Template | null) => void
@@ -75,6 +77,8 @@ export const useStore = create<AppStore>((set) => ({
   templateSearch: '', modelDownloads: {}, hfDownloads: [],
   hubQuery: '', hubResults: [], hubSelectedModelId: null,
   compactSidebarEnabled: localStorage.getItem('compactSidebar') === 'true',
+  routerStatus: null,
+  setRouterStatus: (s) => set({ routerStatus: s }),
   setCompactSidebarEnabled: (enabled) => {
     localStorage.setItem('compactSidebar', String(enabled))
     set({ compactSidebarEnabled: enabled })

@@ -42,6 +42,9 @@ export interface Template {
   launchMode?: 'chat' | 'api'
   createdAt: string
   updatedAt: string
+  // Set by the pi router when it auto-creates a template for an unknown model.
+  // Cleared once the user edits + saves it through CreateModal.
+  autoCreated?: boolean
   _file?: string
 }
 export interface ReleaseInfo {

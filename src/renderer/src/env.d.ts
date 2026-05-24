@@ -79,9 +79,11 @@ interface LlamaCppApi {
   getLatestBenchResults: () => Promise<Record<string, unknown>[]>
   benchExportMarkdown: (content: string) => Promise<{ success: boolean; path?: string; error?: string; canceled?: boolean }>
   benchExportPdf: () => Promise<{ success: boolean; path?: string; error?: string; canceled?: boolean }>
-  getRouterStatus: () => Promise<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null }>
+  getRouterStatus: () => Promise<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null; currentModelPath: string | null }>
   routerRefreshCatalog: () => Promise<{ success: boolean; count: number }>
-  routerSetEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string; status?: { listening: boolean; port: number; catalogSize: number; currentModelId: string | null } }>
+  routerSetEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string; status?: { listening: boolean; port: number; catalogSize: number; currentModelId: string | null; currentModelPath: string | null } }>
+  onTemplateListChanged: (cb: () => void) => void
+  removeTemplateListChangedListener: () => void
 }
 declare global {
   interface Window { api: LlamaCppApi }
