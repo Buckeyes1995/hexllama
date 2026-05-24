@@ -18,7 +18,7 @@ export default function SettingsView() {
   const [expandedEditor, setExpandedEditor] = useState<string | null>(null)
   const [notifPref, setNotifPref] = useState<'banner' | 'manual'>(getNotifPref())
   const [extFolders, setExtFolders] = useState<string[]>([])
-  const [routerStatus, setRouterStatus] = useState<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null } | null>(null)
+  const [routerStatus, setRouterStatus] = useState<{ listening: boolean; port: number; catalogSize: number; currentModelId: string | null; currentModelPath: string | null } | null>(null)
   const [refreshingCatalog, setRefreshingCatalog] = useState(false)
 
   useEffect(() => {

@@ -5,13 +5,14 @@
 // Phase 1: catalog + /v1/models. Swap logic lives in `serveCompletion` below
 // and is filled in by phase 2 (TaskCreate #7).
 
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import http from 'http'
 import os from 'os'
 import { spawn, ChildProcess } from 'child_process'
 import { join, extname, basename, dirname, resolve } from 'path'
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, promises as fsPromises } from 'fs'
 import { readNativeContext } from './gguf'
+import { findRunningCardForModel } from './runningCards'
 
 const APP_ROOT = app.isPackaged ? app.getPath('userData') : process.cwd()
 const MODELS_DIR = join(APP_ROOT, 'models')
@@ -58,6 +59,7 @@ interface RouterState {
   server: http.Server | null
   catalog: ModelEntry[]
   currentModelId: string | null
+  currentModelPath: string | null
   currentLlamaPort: number | null
   currentProc: ChildProcess | null
   // Single in-flight swap so concurrent /v1/chat/completions calls don't race.
@@ -69,6 +71,7 @@ const state: RouterState = {
   server: null,
   catalog: [],
   currentModelId: null,
+  currentModelPath: null,
   currentLlamaPort: null,
   currentProc: null,
   swapping: null
@@ -175,6 +178,17 @@ interface TemplateLike {
   args?: Record<string, string | number | boolean | null>
 }
 
+interface TemplateOnDisk extends TemplateLike {
+  id: string
+  name: string
+  serverPort: number
+  args: Record<string, string | number | boolean | null>
+  launchMode?: 'chat' | 'api'
+  createdAt: string
+  updatedAt: string
+  autoCreated?: boolean
+}
+
 function readTemplates(): TemplateLike[] {
   if (!existsSync(TEMPLATES_DIR)) return []
   const out: TemplateLike[] = []
@@ -187,6 +201,70 @@ function readTemplates(): TemplateLike[] {
     }
   }
   return out
+}
+
+function broadcastTemplatesChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('template-list-changed')
+  }
+}
+
+// On router startup, scrub any auto-templates leftover from a previous run.
+// User-promoted templates have autoCreated=false (or absent) and stay put.
+function cleanupOrphanAutoTemplates(): number {
+  if (!existsSync(TEMPLATES_DIR)) return 0
+  let removed = 0
+  for (const f of readdirSync(TEMPLATES_DIR)) {
+    if (!f.endsWith('.json')) continue
+    const fp = join(TEMPLATES_DIR, f)
+    try {
+      const t = JSON.parse(readFileSync(fp, 'utf-8')) as TemplateOnDisk
+      if (t.autoCreated) {
+        unlinkSync(fp)
+        removed++
+      }
+    } catch {
+      // skip unparseable
+    }
+  }
+  if (removed > 0) console.log(`[router] cleaned up ${removed} orphan auto-template(s)`)
+  return removed
+}
+
+function writeAutoTemplate(model: ModelEntry, cfg: ResolvedSpawn, backendVersion: string | null): TemplateOnDisk {
+  // Build a template that mirrors what the router actually spawned, so if the
+  // user "promotes" it the resulting card will run with the same config.
+  const argMap: Record<string, string | number | boolean> = {}
+  for (let i = 0; i < cfg.args.length; i++) {
+    const a = cfg.args[i]
+    if (a === '-m' || a === '--model' || a === '--port' || a === '--no-webui') {
+      // Skip — these are owned by the launch logic, not the template body.
+      if (a === '-m' || a === '--model' || a === '--port') i++
+      continue
+    }
+    const next = cfg.args[i + 1]
+    if (next && !next.startsWith('-')) { argMap[a] = next; i++ }
+    else { argMap[a] = true }
+  }
+  const now = new Date().toISOString()
+  // Stable id derived from filename so the same model only ever has one auto card.
+  const id = `auto-${model.id}`
+  const tpl: TemplateOnDisk = {
+    id,
+    name: `🤖 ${model.filename.replace(/\.(gguf|bin|ggml)$/i, '')}`,
+    description: 'Auto-created by the pi router. Edit and save to make it permanent.',
+    backendVersion: backendVersion || undefined,
+    modelPath: model.path,
+    serverPort: cfg.port,
+    args: argMap,
+    launchMode: 'api',
+    createdAt: now,
+    updatedAt: now,
+    autoCreated: true
+  }
+  if (!existsSync(TEMPLATES_DIR)) mkdirSync(TEMPLATES_DIR, { recursive: true })
+  writeFileSync(join(TEMPLATES_DIR, `${id}.json`), JSON.stringify(tpl, null, 2))
+  return tpl
 }
 
 function findLlamaServerBinary(): string | null {
@@ -231,12 +309,20 @@ function findBackendBinaryByName(backendVersion: string): string | null {
   return walkFor(base, targetNames, 0)
 }
 
-function resolveSpawn(model: ModelEntry): ResolvedSpawn {
+interface ResolvedSpawnFull extends ResolvedSpawn {
+  matchedTemplate: TemplateLike | null
+  backendVersion: string | null
+}
+
+function resolveSpawn(model: ModelEntry): ResolvedSpawnFull {
   const templates = readTemplates()
   // Match by absolute path so different templates pointing at the same file collapse.
-  const match = templates.find(t => t.modelPath && resolve(t.modelPath) === resolve(model.path))
+  const match = templates.find(t => t.modelPath && resolve(t.modelPath) === resolve(model.path)) || null
   const exe = (match?.backendVersion && findBackendBinaryByName(match.backendVersion)) || findLlamaServerBinary()
   if (!exe) throw new Error('No llama-server binary found in BACKEND_DIR. Install a backend in hexllama first.')
+  // Reverse-engineer which backend dir we landed on (newest, by build number) so
+  // auto-templates can record it.
+  const backendVersion = match?.backendVersion || newestBackendDirName()
 
   const args: string[] = []
   const argMap: Record<string, string | number | boolean | null> = { ...(match?.args || {}) }
@@ -256,7 +342,19 @@ function resolveSpawn(model: ModelEntry): ResolvedSpawn {
     args.push('-ngl', '99', '-fa', '1', '-c', String(clampedCtx(model.nativeCtx)))
   }
   args.push('-m', model.path, '--port', String(LLAMA_SLOT_PORT), '--no-webui')
-  return { exe, args, port: LLAMA_SLOT_PORT }
+  return { exe, args, port: LLAMA_SLOT_PORT, matchedTemplate: match, backendVersion }
+}
+
+function newestBackendDirName(): string | null {
+  if (!existsSync(BACKEND_DIR)) return null
+  const dirs = readdirSync(BACKEND_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => d.name)
+    .sort((a, b) => {
+      const n = (s: string) => parseInt((s.match(/(\d{3,6})/) || ['0', '0'])[1], 10)
+      return n(b) - n(a)
+    })
+  return dirs[0] || null
 }
 
 function writePidFile(pid: number): void {
@@ -289,6 +387,7 @@ async function killCurrent(): Promise<void> {
   state.currentProc = null
   const wasModel = state.currentModelId
   state.currentModelId = null
+  state.currentModelPath = null
   state.currentLlamaPort = null
   await new Promise<void>(done => {
     let resolved = false
@@ -323,6 +422,11 @@ async function loadModel(modelId: string): Promise<void> {
   const entry = state.catalog.find(m => m.id === modelId)
   if (!entry) throw new Error(`Unknown model: ${modelId}`)
   const cfg = resolveSpawn(entry)
+  // Materialize a card for unknown models so the dashboard shows what pi is doing.
+  if (!cfg.matchedTemplate) {
+    writeAutoTemplate(entry, cfg, cfg.backendVersion)
+    broadcastTemplatesChanged()
+  }
   console.log(`[router] loading ${modelId} (${basename(cfg.exe)}) ${cfg.args.join(' ')}`)
   const proc = spawn(cfg.exe, cfg.args, { cwd: dirname(cfg.exe), stdio: 'pipe' })
   proc.stderr?.on('data', d => process.stderr.write(`[router-llama] ${d}`))
@@ -331,6 +435,7 @@ async function loadModel(modelId: string): Promise<void> {
     if (state.currentProc === proc) {
       state.currentProc = null
       state.currentModelId = null
+      state.currentModelPath = null
       state.currentLlamaPort = null
       clearPidFile()
     }
@@ -338,6 +443,7 @@ async function loadModel(modelId: string): Promise<void> {
   })
   state.currentProc = proc
   state.currentModelId = modelId
+  state.currentModelPath = entry.path
   state.currentLlamaPort = cfg.port
   if (proc.pid) writePidFile(proc.pid)
   await waitForHealth(cfg.port)
@@ -369,18 +475,28 @@ function serveCompletion(req: http.IncomingMessage, res: http.ServerResponse) {
 
     const modelId = String(parsed.model || '').trim()
     if (!modelId) return jsonResponse(res, 400, { error: { message: '`model` field required', type: 'invalid_request_error' } })
-    if (!state.catalog.find(m => m.id === modelId)) {
+    const entry = state.catalog.find(m => m.id === modelId)
+    if (!entry) {
       return jsonResponse(res, 404, { error: { message: `Unknown model: ${modelId}. GET /v1/models for the catalog.`, type: 'invalid_request_error' } })
     }
 
-    try {
-      await ensureModelLoaded(modelId)
-    } catch (err) {
-      return jsonResponse(res, 500, { error: { message: `Failed to load ${modelId}: ${String(err)}`, type: 'server_error' } })
+    // Avoid double-loading: if a user-started card is already serving this exact
+    // GGUF file, proxy to its port instead of spawning the router's own slot.
+    // Two copies of a multi-GB model in unified memory will OOM Metal and bubble
+    // back as "Compute error" 500s.
+    let port: number
+    const existing = findRunningCardForModel(entry.path)
+    if (existing) {
+      port = existing.port
+    } else {
+      try {
+        await ensureModelLoaded(modelId)
+      } catch (err) {
+        return jsonResponse(res, 500, { error: { message: `Failed to load ${modelId}: ${String(err)}`, type: 'server_error' } })
+      }
+      if (!state.currentLlamaPort) return jsonResponse(res, 500, { error: { message: 'No llama-server port after swap', type: 'server_error' } })
+      port = state.currentLlamaPort
     }
-
-    const port = state.currentLlamaPort
-    if (!port) return jsonResponse(res, 500, { error: { message: 'No llama-server port after swap', type: 'server_error' } })
 
     // Forward request, stream response.
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Content-Length': String(raw.length) }
@@ -448,6 +564,9 @@ export async function startRouter(opts?: { port?: number }): Promise<void> {
   // Kill any llama-server orphaned from a prior crash / dev hot-reload before
   // we accept new requests — otherwise the next swap will collide on :18080.
   killStaleLlamaFromPidFile()
+  // Auto-templates from a prior run aren't running anymore; broadcast after
+  // cleanup so the dashboard drops them if a window is already open.
+  if (cleanupOrphanAutoTemplates() > 0) broadcastTemplatesChanged()
   state.catalog = await scanModels()
   await new Promise<void>((resolve, reject) => {
     const server = http.createServer(handleRequest)
@@ -530,7 +649,8 @@ export function getRouterStatus() {
     listening: !!state.server,
     port: state.port,
     catalogSize: state.catalog.length,
-    currentModelId: state.currentModelId
+    currentModelId: state.currentModelId,
+    currentModelPath: state.currentModelPath
   }
 }
 

@@ -1,11 +1,12 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { getRouterStatus, refreshCatalog, startRouter, stopRouter } from './router'
+import { setRunningCard, removeRunningCard, hasRunningCard, getRunningCardProc, extractModelPathFromArgs } from './runningCards'
 import {
   existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync,
   unlinkSync, createWriteStream, statSync, rmdirSync, renameSync, promises as fsPromises
 } from 'fs'
 import { join, extname, basename, dirname, resolve } from 'path'
-import { spawn, ChildProcess } from 'child_process'
+import { spawn } from 'child_process'
 import https from 'https'
 import http from 'http'
 import { app } from 'electron'
@@ -38,7 +39,7 @@ async function loadSettings(): Promise<AppSettings> {
 async function saveSettings(s: AppSettings): Promise<void> {
   await fsPromises.writeFile(SETTINGS_PATH, JSON.stringify(s, null, 2))
 }
-const runningProcesses = new Map<string, ChildProcess>()
+// Tracked via runningCards module so the router can find existing card processes.
 let sharedChatWindow: BrowserWindow | null = null
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -490,7 +491,7 @@ export function registerIpcHandlers(): void {
     return r.filePaths[0]
   })
   ipcMain.handle('run-model', async (_e, opts: { id: string; name: string; backendPath: string; exe: string; args: string[]; openBrowser: boolean; port: number }) => {
-    if (runningProcesses.has(opts.id)) return { success: false, error: 'Already running' }
+    if (hasRunningCard(opts.id)) return { success: false, error: 'Already running' }
     const port = opts.port || 8080
     let available = await isPortAvailable(port)
     let finalPort = port
@@ -546,19 +547,23 @@ export function registerIpcHandlers(): void {
           msg = 'Architecture mismatch: You are trying to run an ARM64 backend on an x64 system. Please delete this backend in Settings and download the x64 version.'
         }
         console.error('[llama-server] spawn error:', msg)
-        runningProcesses.delete(opts.id)
+        removeRunningCard(opts.id)
         _e.sender.send('model-error', { id: opts.id, error: msg })
       })
-      runningProcesses.set(opts.id, proc)
+      const modelPath = extractModelPathFromArgs(finalArgs)
+      // modelPath is required for the router-proxy lookup; if a card spawn lacks
+      // -m/--model we still track it (port-only) so kill/has still work, but the
+      // router won't find it via model lookup.
+      setRunningCard(opts.id, proc, finalPort, modelPath || '')
       proc.on('exit', () => {
-        runningProcesses.delete(opts.id)
+        removeRunningCard(opts.id)
         BrowserWindow.getAllWindows().forEach(win => {
           win.webContents.send('model-exited', { id: opts.id })
         })
       })
       if (opts.openBrowser) {
         setTimeout(() => {
-          if (runningProcesses.has(opts.id)) {
+          if (hasRunningCard(opts.id)) {
             openChatWindow(finalPort, opts.name)
           }
         }, 2500)
@@ -696,9 +701,9 @@ export function registerIpcHandlers(): void {
     })
   })
   ipcMain.handle('stop-model', (_e, id: string) => {
-    const proc = runningProcesses.get(id)
+    const proc = getRunningCardProc(id)
     if (!proc) return { success: true, alreadyStopped: true }
-    proc.kill(); runningProcesses.delete(id)
+    proc.kill(); removeRunningCard(id)
     return { success: true }
   })
   let cancelBackendDl: (() => void) | null = null

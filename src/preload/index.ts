@@ -73,6 +73,11 @@ const api = {
   getRouterStatus: () => ipcRenderer.invoke('router-status'),
   routerRefreshCatalog: () => ipcRenderer.invoke('router-refresh-catalog'),
   routerSetEnabled: (enabled: boolean) => ipcRenderer.invoke('router-set-enabled', enabled),
+  onTemplateListChanged: (cb: () => void) => {
+    ipcRenderer.removeAllListeners('template-list-changed')
+    ipcRenderer.on('template-list-changed', () => cb())
+  },
+  removeTemplateListChangedListener: () => ipcRenderer.removeAllListeners('template-list-changed'),
 }
 if (process.contextIsolated) {
   try {
