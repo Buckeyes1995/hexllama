@@ -568,14 +568,31 @@ export async function startRouter(opts?: { port?: number }): Promise<void> {
   // cleanup so the dashboard drops them if a window is already open.
   if (cleanupOrphanAutoTemplates() > 0) broadcastTemplatesChanged()
   state.catalog = await scanModels()
+  // Listen with retry-on-EADDRINUSE. The previous Electron main process may
+  // still be holding :7878 in TIME_WAIT during a dev hot-restart; a short
+  // backoff gets us past that without forcing the user to toggle the router
+  // off/on in Settings. Any other listen error (or a genuinely-occupied port
+  // after retries are exhausted) still propagates.
+  const MAX_LISTEN_ATTEMPTS = 4
+  const LISTEN_RETRY_MS = 250
   await new Promise<void>((resolve, reject) => {
-    const server = http.createServer(handleRequest)
-    server.once('error', reject)
-    server.listen(state.port, '127.0.0.1', () => {
-      state.server = server
-      console.log(`[router] listening on http://127.0.0.1:${state.port} (catalog: ${state.catalog.length} models)`)
-      resolve()
-    })
+    const tryListen = (attempt: number): void => {
+      const server = http.createServer(handleRequest)
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE' && attempt < MAX_LISTEN_ATTEMPTS) {
+          console.warn(`[router] port ${state.port} busy (attempt ${attempt}/${MAX_LISTEN_ATTEMPTS}); retrying in ${LISTEN_RETRY_MS}ms`)
+          setTimeout(() => tryListen(attempt + 1), LISTEN_RETRY_MS)
+        } else {
+          reject(err)
+        }
+      })
+      server.listen(state.port, '127.0.0.1', () => {
+        state.server = server
+        console.log(`[router] listening on http://127.0.0.1:${state.port} (catalog: ${state.catalog.length} models)`)
+        resolve()
+      })
+    }
+    tryListen(1)
   })
   await writePiConfig().catch(err => console.error('[router] pi config write failed:', err))
 }
