@@ -62,6 +62,9 @@ interface RouterState {
   currentModelPath: string | null
   currentLlamaPort: number | null
   currentProc: ChildProcess | null
+  // When the current model finished warmup. Used by /hexllama/current to
+  // report uptime; null whenever nothing is loaded.
+  currentLoadedAtMs: number | null
   // Single in-flight swap so concurrent /v1/chat/completions calls don't race.
   swapping: Promise<void> | null
 }
@@ -74,6 +77,7 @@ const state: RouterState = {
   currentModelPath: null,
   currentLlamaPort: null,
   currentProc: null,
+  currentLoadedAtMs: null,
   swapping: null
 }
 
@@ -389,6 +393,7 @@ async function killCurrent(): Promise<void> {
   state.currentModelId = null
   state.currentModelPath = null
   state.currentLlamaPort = null
+  state.currentLoadedAtMs = null
   await new Promise<void>(done => {
     let resolved = false
     const finish = () => { if (!resolved) { resolved = true; done() } }
@@ -437,6 +442,7 @@ async function loadModel(modelId: string): Promise<void> {
       state.currentModelId = null
       state.currentModelPath = null
       state.currentLlamaPort = null
+      state.currentLoadedAtMs = null
       clearPidFile()
     }
     console.log(`[router] llama-server exited (code ${code})`)
@@ -447,6 +453,7 @@ async function loadModel(modelId: string): Promise<void> {
   state.currentLlamaPort = cfg.port
   if (proc.pid) writePidFile(proc.pid)
   await waitForHealth(cfg.port)
+  state.currentLoadedAtMs = Date.now()
   console.log(`[router] ${modelId} ready on :${cfg.port}`)
 }
 
@@ -523,6 +530,110 @@ function serveCompletion(req: http.IncomingMessage, res: http.ServerResponse) {
   })
 }
 
+// Render a catalog entry plus live "is this loaded right now?" annotations.
+// Used by /hexllama/catalog and /hexllama/current. Kept as a single helper so
+// the field shape stays consistent across endpoints.
+function catalogEntryView(m: ModelEntry) {
+  const isLoaded = state.currentModelId === m.id && !!state.currentProc
+  return {
+    id: m.id,
+    filename: m.filename,
+    path: m.path,
+    sizeBytes: m.size,
+    nativeCtxTrain: m.nativeCtx,
+    external: m.external,
+    isLoaded,
+    port: isLoaded ? state.currentLlamaPort : null,
+    loadedAtMs: isLoaded ? state.currentLoadedAtMs : null
+  }
+}
+
+function serveHexllamaCatalog(res: http.ServerResponse): void {
+  const sorted = [...state.catalog].sort((a, b) => a.filename.localeCompare(b.filename))
+  jsonResponse(res, 200, {
+    current: state.currentModelId ? {
+      id: state.currentModelId,
+      port: state.currentLlamaPort,
+      path: state.currentModelPath,
+      loadedAtMs: state.currentLoadedAtMs
+    } : null,
+    models: sorted.map(catalogEntryView)
+  })
+}
+
+function serveHexllamaCurrent(res: http.ServerResponse): void {
+  if (!state.currentModelId) {
+    return jsonResponse(res, 200, { modelId: null })
+  }
+  jsonResponse(res, 200, {
+    modelId: state.currentModelId,
+    port: state.currentLlamaPort,
+    path: state.currentModelPath,
+    loadedAtMs: state.currentLoadedAtMs,
+    upMs: state.currentLoadedAtMs ? Date.now() - state.currentLoadedAtMs : null
+  })
+}
+
+function serveHexllamaLoad(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const chunks: Buffer[] = []
+  req.on('data', c => chunks.push(c))
+  req.on('end', async () => {
+    let body: { modelId?: string }
+    try { body = JSON.parse(Buffer.concat(chunks).toString() || '{}') }
+    catch { return jsonResponse(res, 400, { error: { message: 'Body must be JSON', type: 'invalid_request_error' } }) }
+    const modelId = body.modelId
+    if (!modelId) return jsonResponse(res, 400, { error: { message: '`modelId` field required', type: 'invalid_request_error' } })
+    const entry = state.catalog.find(m => m.id === modelId)
+    if (!entry) {
+      return jsonResponse(res, 404, { error: { message: `Unknown model: ${modelId}. GET /hexllama/catalog for the list.`, type: 'invalid_request_error' } })
+    }
+    // If a user-started card already serves this exact GGUF, don't try to
+    // hijack it — report success with the card's port so the caller can hit it
+    // directly via /v1/chat/completions. Same logic as serveCompletion.
+    const existing = findRunningCardForModel(entry.path)
+    if (existing) {
+      return jsonResponse(res, 200, {
+        loaded: true,
+        modelId,
+        port: existing.port,
+        warmupMs: 0,
+        servedBy: 'card'
+      })
+    }
+    const startMs = Date.now()
+    try {
+      await ensureModelLoaded(modelId)
+    } catch (err) {
+      return jsonResponse(res, 500, { error: { message: `Failed to load ${modelId}: ${String(err)}`, type: 'server_error' } })
+    }
+    if (!state.currentLlamaPort) {
+      return jsonResponse(res, 500, { error: { message: 'No llama-server port after load', type: 'server_error' } })
+    }
+    jsonResponse(res, 200, {
+      loaded: true,
+      modelId,
+      port: state.currentLlamaPort,
+      warmupMs: Date.now() - startMs,
+      servedBy: 'router'
+    })
+  })
+  req.on('error', err => {
+    if (!res.headersSent) jsonResponse(res, 400, { error: { message: `Request error: ${String(err)}`, type: 'invalid_request_error' } })
+  })
+}
+
+function serveHexllamaStop(res: http.ServerResponse): void {
+  const wasModel = state.currentModelId
+  if (!state.currentProc) {
+    return jsonResponse(res, 200, { stopped: false, modelId: null, message: 'Nothing was loaded' })
+  }
+  killCurrent().then(() => {
+    jsonResponse(res, 200, { stopped: true, modelId: wasModel })
+  }).catch(err => {
+    jsonResponse(res, 500, { error: { message: `Stop failed: ${String(err)}`, type: 'server_error' } })
+  })
+}
+
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   const path = url.pathname
@@ -548,6 +659,22 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
       currentModelId: state.currentModelId,
       catalogSize: state.catalog.length
     })
+  }
+  // Hexllama-native control API. Lets harnesses (pi.dev, scripts) inspect the
+  // catalog and drive model load/swap/stop without going through the
+  // OpenAI-compat surface. The OpenAI surface still works — model swaps still
+  // happen implicitly when /v1/chat/completions arrives with a new model.
+  if (req.method === 'GET' && path === '/hexllama/catalog') {
+    return serveHexllamaCatalog(res)
+  }
+  if (req.method === 'GET' && path === '/hexllama/current') {
+    return serveHexllamaCurrent(res)
+  }
+  if (req.method === 'POST' && path === '/hexllama/load') {
+    return serveHexllamaLoad(req, res)
+  }
+  if (req.method === 'POST' && path === '/hexllama/stop') {
+    return serveHexllamaStop(res)
   }
   notFound(res)
 }
